@@ -11,7 +11,12 @@
 
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
-#define RECONNECT_AFTER 60000UL
+
+#define AO_MG_VERSION_614
+
+#if defined(AO_MG_VERSION_614)
+#define MG_F_IS_AOcppMongooseClient MG_F_USER_2
+#endif
 
 using namespace ArduinoOcpp;
 
@@ -59,6 +64,8 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
 
     ws_ping_interval = declareConfiguration<int>(
         "WebSocketPingInterval", 5, fn, true, true, true, true);
+    reconnect_interval = declareConfiguration<int>(
+        "AO_ReconnectInterval", 120, fn, true, true, true, true);
 
     configuration_save();
 
@@ -89,10 +96,21 @@ void AOcppMongooseClient::loop() {
 }
 
 bool AOcppMongooseClient::sendTXT(std::string &out) {
-    if (!connection_established || !websocket) {
+    if (!websocket || !isConnectionOpen()) {
         return false;
     }
-    size_t sent = mg_ws_send(websocket, out.c_str(), out.length(), WEBSOCKET_OP_TEXT);
+    size_t sent;
+#if defined(AO_MG_VERSION_614)
+    if (websocket->send_mbuf.len > 0) {
+        sent = 0;
+        return false;
+    } else {
+        mg_send_websocket_frame(websocket, WEBSOCKET_OP_TEXT, out.c_str(), out.length());
+        sent = out.length();
+    }
+#else
+    sent = mg_ws_send(websocket, out.c_str(), out.length(), WEBSOCKET_OP_TEXT);
+#endif
     if (sent < out.length()) {
         AO_DBG_WARN("mg_ws_send did only accept %zu out of %zu bytes", sent, out.length());
         //flush broken package and wait for next retry
@@ -107,7 +125,7 @@ void AOcppMongooseClient::maintainWsConn() {
         last_status_dbg_msg = ao_tick_ms();
 
         //WS successfully connected?
-        if (!connection_established) {
+        if (!isConnectionOpen()) {
             AO_DBG_DEBUG("WS unconnected");
         } else if (ao_tick_ms() - last_recv >= (ws_ping_interval && *ws_ping_interval > 0 ? (*ws_ping_interval * 1000UL) : 0UL) + WS_UNRESPONSIVE_THRESHOLD_MS) {
             //WS connected but unresponsive
@@ -115,25 +133,17 @@ void AOcppMongooseClient::maintainWsConn() {
         }
     }
 
-    if (backend_url.empty()) {
-        //OCPP connection should be closed
-        if (websocket) {
-            AO_DBG_INFO("Closing websocket");
-            websocket->is_closing = 1; //mg will close WebSocket, callback will set websocket = nullptr
-        }
-        return;
-    }
-
-    if (ws_ping_interval && *ws_ping_interval > 0 && websocket && ao_tick_ms() - last_hb >= (*ws_ping_interval * 1000UL)) {
+    if (websocket && isConnectionOpen() &&
+            ws_ping_interval && *ws_ping_interval > 0 && ao_tick_ms() - last_hb >= (*ws_ping_interval * 1000UL)) {
         last_hb = ao_tick_ms();
+#if defined(AO_MG_VERSION_614)
+        mg_send_websocket_frame(websocket, WEBSOCKET_OP_PING, "", 0);
+#else
         mg_ws_send(websocket, "", 0, WEBSOCKET_OP_PING);
+#endif
     }
 
     if (websocket != nullptr) { //connection pointer != nullptr means that the socket is still open
-        return;
-    }
-
-    if (ao_tick_ms() - last_reconnection_attempt < RECONNECT_AFTER) {
         return;
     }
 
@@ -142,9 +152,52 @@ void AOcppMongooseClient::maintainWsConn() {
         credentials_changed = false;
     }
 
+    if (url.empty()) {
+        //cannot open OCPP connection: credentials missing
+        return;
+    }
+
+    if (reconnect_interval && *reconnect_interval > 0 && ao_tick_ms() - last_reconnection_attempt < (*reconnect_interval * 1000UL)) {
+        return;
+    }
+
     AO_DBG_DEBUG("(re-)connect to %s", url.c_str());
 
     last_reconnection_attempt = ao_tick_ms();
+
+#if defined(AO_MG_VERSION_614)
+    AO_DBG_DEBUG("use MG version %s (tested with 6.14)", MG_VERSION);
+
+    struct mg_connect_opts opts;
+    memset(&opts, 0, sizeof(opts));
+
+    opts.ssl_ca_cert = ca_cert.empty() ? "*" : ca_cert.c_str();
+
+    char extra_headers [128] = {'\0'};
+
+    if (!auth_key.empty()) {
+        auto ret = snprintf(extra_headers, 128, "Authorization: Basic %s\r\n", basic_auth64.c_str());
+        if (ret < 0 || ret >= 128) {
+            AO_DBG_ERR("Basic Authentication failed: %d", ret);
+            (void)0;
+        }
+    }
+
+    websocket = mg_connect_ws_opt(
+        mgr,
+        ws_cb,
+        this,
+        opts,
+        url.c_str(),
+        "ocpp1.6",
+        *extra_headers ? extra_headers : nullptr);
+    
+    if (websocket) {
+        websocket->flags |= MG_F_IS_AOcppMongooseClient;
+    }
+
+#else
+    AO_DBG_DEBUG("use MG version %s (tested with 7.8)", MG_VERSION);
 
     websocket = mg_ws_connect(
         mgr, 
@@ -154,6 +207,7 @@ void AOcppMongooseClient::maintainWsConn() {
         "%s%s%s\r\n", "Sec-WebSocket-Protocol: ocpp1.6",
                       basic_auth64.empty() ? "" : "\r\nAuthorization: Basic ", 
                       basic_auth64.empty() ? "" : basic_auth64.c_str());     // Create client
+#endif
 }
 
 void AOcppMongooseClient::reload_credentials() {
@@ -207,11 +261,9 @@ void AOcppMongooseClient::setBackendUrl(const char *backend_url_cstr) {
         configuration_save();
     }
 
-    if (websocket) {
-        websocket->is_closing = 1; //socket will be closed and connected again
-    }
-
     credentials_changed = true; //reload composed credentials when reconnecting the next time
+
+    reconnect();
 }
 
 void AOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
@@ -226,11 +278,9 @@ void AOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
         configuration_save();
     }
 
-    if (websocket) {
-        websocket->is_closing = 1; //socket will be closed and connected again
-    }
-
     credentials_changed = true; //reload composed credentials when reconnecting the next time
+
+    reconnect();
 }
 
 void AOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
@@ -245,11 +295,9 @@ void AOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
         configuration_save();
     }
 
-    if (websocket) {
-        websocket->is_closing = 1; //socket will be closed and connected again
-    }
-
     credentials_changed = true; //reload composed credentials when reconnecting the next time
+
+    reconnect();
 }
 
 void AOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
@@ -266,32 +314,101 @@ void AOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
     }
 #endif
 
-    if (websocket) {
-        websocket->is_closing = 1; //socket will be closed and connected again
-    }
-
     credentials_changed = true; //reload composed credentials when reconnecting the next time
+
+    reconnect();
 }
 
 void AOcppMongooseClient::reconnect() {
     if (!websocket) {
-        AO_DBG_WARN("no pending WebSocket, ignore");
         return;
     }
-
+#if defined(AO_MG_VERSION_614)
+    if (!connection_closing) {
+        const char *msg = "socket closed by client";
+        mg_send_websocket_frame(websocket, WEBSOCKET_OP_CLOSE, msg, strlen(msg));
+    }
+#else
     websocket->is_closing = 1; //Mongoose will close the socket and the following maintainWsConn() call will open it again
+#endif
+    setConnectionOpen(false);
 }
 
-void AOcppMongooseClient::setConnectionEstablished(bool established) {
-    connection_established = established;
-    if (connection_established == false) {
-        websocket = nullptr;
+void AOcppMongooseClient::setConnectionOpen(bool open) {
+    if (open) {
+        connection_established = true;
+    } else {
+        connection_closing = true;
     }
+}
+
+void AOcppMongooseClient::cleanConnection() {
+    connection_established = false;
+    connection_closing = false;
+    websocket = nullptr;
 }
 
 void AOcppMongooseClient::updateRcvTimer() {
     last_recv = ao_tick_ms();
 }
+
+#if defined(AO_MG_VERSION_614)
+
+void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
+
+    AOcppMongooseClient *osock = nullptr;
+    
+    if (nc->flags & MG_F_IS_WEBSOCKET && nc->flags & MG_F_IS_AOcppMongooseClient) {
+        osock = reinterpret_cast<AOcppMongooseClient*>(user_data);
+    } else {
+        return;
+    }
+
+    switch (ev) {
+        case MG_EV_CONNECT: {
+            int status = *((int *) ev_data);
+            if (status != 0) {
+                AO_DBG_WARN("connection %s -- error %d", osock->getUrl(), status);
+                (void)0;
+            }
+            break;
+        }
+        case MG_EV_WEBSOCKET_HANDSHAKE_DONE: {
+            struct http_message *hm = (struct http_message *) ev_data;
+            if (hm->resp_code == 101) {
+                AO_DBG_INFO("connection %s -- connected!", osock->getUrl());
+                osock->setConnectionOpen(true);
+            } else {
+                AO_DBG_WARN("connection %s -- HTTP error %d", osock->getUrl(), hm->resp_code);
+                (void)0;
+                /* Connection will be closed after this. */
+            }
+            osock->updateRcvTimer();
+            break;
+        }
+        case MG_EV_POLL: {
+            /* Nothing to do here. OCPP engine has own loop-function */
+            break;
+        }
+        case MG_EV_WEBSOCKET_FRAME: {
+            struct websocket_message *wm = (struct websocket_message *) ev_data;
+
+            if (!osock->getReceiveTXTcallback()((const char *) wm->data, wm->size)) { //forward message to OcppEngine
+                AO_DBG_ERR("processing WS input failed");
+                (void)0;
+            }
+            osock->updateRcvTimer();
+            break;
+        }
+        case MG_EV_CLOSE: {
+            AO_DBG_INFO("connection %s -- closed", osock->getUrl());
+            osock->cleanConnection();
+            break;
+        }
+    }
+}
+
+#else
 
 void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     if (ev != 2) printf("[MG] Cb fn with event: %d\n", ev);
@@ -314,7 +431,7 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     } else if (ev == MG_EV_WS_OPEN) {
         // WS connection established. Perform MQTT login
         MG_INFO(("Connected to WS"));
-        osock->setConnectionEstablished(true);
+        osock->setConnectionOpen(true);
     } else if (ev == MG_EV_WS_MSG) {
         struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
         MG_INFO(("GOT %d bytes WS msg", (int) wm->data.len));
@@ -328,6 +445,7 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
 
     if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
         MG_INFO(("Connected ended"));
-        osock->setConnectionEstablished(false);
+        osock->cleanConnection();
     }
 }
+#endif
