@@ -6,9 +6,7 @@ Mongoose WebSocket adapter for ArduinoOcpp
 The following projects must be available on the include path:
 
 - [Mongoose Embedded Networking Library v7.8](https://github.com/cesanta/mongoose/tree/76e6b23a4f0261dd534d33632f42ea1bba99dc85): This project works with the amalgamated files `mongoose.h` and `mongoose.c`. You may need to copy them from the Mongoose-repository into the `src` folder of your project.
-
 - [ArduinoJson v6.19.1](https://github.com/bblanchon/ArduinoJson/tree/079ccadbee4100ad0b2d06f11de8c412b95853c1)
-
 - [ArduinoOcpp](https://github.com/matth-x/ArduinoOcpp)
 
 The setup is done if the following include statements work:

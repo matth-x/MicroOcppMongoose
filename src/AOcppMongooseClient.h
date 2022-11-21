@@ -2,6 +2,9 @@
 // Copyright Matthias Akstaller 2019 - 2022
 // GPL-3.0 License (see LICENSE)
 
+#ifndef AOCPPMONGOOSECLIENT_H
+#define AOCPPMONGOOSECLIENT_H
+
 #include "mongoose.h"
 #include <ArduinoOcpp/Core/OcppSocket.h>
 
@@ -18,9 +21,9 @@
 #endif
 
 namespace ArduinoOcpp {
+
 class FilesystemAdapter;
 template<class T> class Configuration;
-}
 
 class AOcppMongooseClient : public ArduinoOcpp::OcppSocket {
 private:
@@ -32,18 +35,18 @@ private:
     std::string auth_key;
     std::string basic_auth64;
     std::string ca_cert;
-    std::shared_ptr<ArduinoOcpp::Configuration<const char*>> setting_backend_url;
-    std::shared_ptr<ArduinoOcpp::Configuration<const char*>> setting_cb_id;
-    std::shared_ptr<ArduinoOcpp::Configuration<const char*>> setting_auth_key;
+    std::shared_ptr<Configuration<const char*>> setting_backend_url;
+    std::shared_ptr<Configuration<const char*>> setting_cb_id;
+    std::shared_ptr<Configuration<const char*>> setting_auth_key;
 #if !AO_CA_CERT_USE_FILE
-    std::shared_ptr<ArduinoOcpp::Configuration<const char*>> setting_ca_cert;
+    std::shared_ptr<Configuration<const char*>> setting_ca_cert;
 #endif
     unsigned long last_status_dbg_msg {0}, last_recv {0};
     unsigned long last_reconnection_attempt {-1UL / 2UL};
-    std::shared_ptr<ArduinoOcpp::Configuration<int>> ws_ping_interval = 0; //heartbeat intervall in s. 0 sets hb off
+    std::shared_ptr<Configuration<int>> ws_ping_interval = 0; //heartbeat intervall in s. 0 sets hb off
     unsigned long last_hb {0};
     bool connection_established {false};
-    ArduinoOcpp::ReceiveTXTcallback receiveTXTcallback = [] (const char *, size_t) {return false;};
+    ReceiveTXTcallback receiveTXTcallback = [] (const char *, size_t) {return false;};
 
     bool credentials_changed {true}; //set credentials to be reloaded
     void reload_credentials();
@@ -77,6 +80,8 @@ public:
     void setAuthKey(const char *auth_key);
     void setCaCert(const char *ca_cert); //if AO_CA_CERT_USE_FILE, then pass the filename, otherwise the plain-text CA_cert
 
+    void reconnect(); //after updating all credentials, reconnect to apply them
+
     const char *getBackendUrl() {return backend_url.c_str();}
     const char *getChargeBoxId() {return cb_id.c_str();}
     const char *getAuthKey() {return auth_key.c_str();}
@@ -88,3 +93,7 @@ public:
 
     void updateRcvTimer();
 };
+
+}
+
+#endif

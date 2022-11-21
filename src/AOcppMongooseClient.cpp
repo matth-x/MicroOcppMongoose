@@ -13,6 +13,8 @@
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
 #define RECONNECT_AFTER 60000UL
 
+using namespace ArduinoOcpp;
+
 void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 
 AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
@@ -20,13 +22,13 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
             const char *charge_box_id_default,
             const char *auth_key_default,
             const char *CA_cert_default,
-            std::shared_ptr<ArduinoOcpp::FilesystemAdapter> filesystem) : mgr(mgr) {
+            std::shared_ptr<FilesystemAdapter> filesystem) : mgr(mgr) {
     
     const char *fn;
     bool write_permission;
     
     if (filesystem) {
-        ArduinoOcpp::configuration_init(filesystem);
+        configuration_init(filesystem);
 
         //all credentials are persistent over reboots
 
@@ -40,25 +42,25 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
         write_permission = false;
     }
 
-    setting_backend_url = ArduinoOcpp::declareConfiguration<const char*>(
+    setting_backend_url = declareConfiguration<const char*>(
         "AO_BackendUrl", backend_url_default ? backend_url_default : "",
         fn, write_permission, true, true, true);
-    setting_cb_id = ArduinoOcpp::declareConfiguration<const char*>(
+    setting_cb_id = declareConfiguration<const char*>(
         "AO_ChargeBoxId", charge_box_id_default ? charge_box_id_default : "",
         fn, write_permission, true, true, true);
-    setting_auth_key = ArduinoOcpp::declareConfiguration<const char*>(
+    setting_auth_key = declareConfiguration<const char*>(
         "AuthorizationKey", auth_key_default ? auth_key_default : "",
         fn, write_permission, true, true, true);
 #if !AO_CA_CERT_USE_FILE
-    setting_ca_cert = ArduinoOcpp::declareConfiguration<const char*>(
+    setting_ca_cert = declareConfiguration<const char*>(
         "AO_CaCert", CA_cert_default ? CA_cert_default : "",
         fn, write_permission, true, true, true);
 #endif
 
-    ws_ping_interval = ArduinoOcpp::declareConfiguration<int>(
+    ws_ping_interval = declareConfiguration<int>(
         "WebSocketPingInterval", 5, fn, true, true, true, true);
 
-    ArduinoOcpp::configuration_save();
+    configuration_save();
 
     backend_url = setting_backend_url && *setting_backend_url ? *setting_backend_url : 
         (backend_url_default ? backend_url_default : "");
@@ -202,7 +204,7 @@ void AOcppMongooseClient::setBackendUrl(const char *backend_url_cstr) {
 
     if (setting_backend_url) {
         *setting_backend_url = backend_url_cstr;
-        ArduinoOcpp::configuration_save();
+        configuration_save();
     }
 
     if (websocket) {
@@ -221,7 +223,7 @@ void AOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
 
     if (setting_cb_id) {
         *setting_cb_id = cb_id_cstr;
-        ArduinoOcpp::configuration_save();
+        configuration_save();
     }
 
     if (websocket) {
@@ -240,7 +242,7 @@ void AOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
 
     if (setting_auth_key) {
         *setting_auth_key = auth_key_cstr;
-        ArduinoOcpp::configuration_save();
+        configuration_save();
     }
 
     if (websocket) {
@@ -260,7 +262,7 @@ void AOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
 #if !AO_CA_CERT_USE_FILE
     if (setting_ca_cert) {
         *setting_ca_cert = ca_cert_cstr;
-        ArduinoOcpp::configuration_save();
+        configuration_save();
     }
 #endif
 
@@ -269,6 +271,15 @@ void AOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
     }
 
     credentials_changed = true; //reload composed credentials when reconnecting the next time
+}
+
+void AOcppMongooseClient::reconnect() {
+    if (!websocket) {
+        AO_DBG_WARN("no pending WebSocket, ignore");
+        return;
+    }
+
+    websocket->is_closing = 1; //Mongoose will close the socket and the following maintainWsConn() call will open it again
 }
 
 void AOcppMongooseClient::setConnectionEstablished(bool established) {
