@@ -12,8 +12,6 @@
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
 
-#define AO_MG_VERSION_614
-
 #if defined(AO_MG_VERSION_614)
 #define MG_F_IS_AOcppMongooseClient MG_F_USER_2
 #endif
@@ -81,6 +79,12 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
         (CA_cert_default ? CA_cert_default : "");
 #else
     ca_cert = CA_cert_default ? CA_cert_default : "";
+#endif
+
+#if defined(AO_MG_VERSION_614)
+    AO_DBG_DEBUG("use MG version %s (tested with 6.14)", MG_VERSION);
+#else
+    AO_DBG_DEBUG("use MG version %s (tested with 7.8)", MG_VERSION);
 #endif
 
     maintainWsConn();
@@ -166,7 +170,6 @@ void AOcppMongooseClient::maintainWsConn() {
     last_reconnection_attempt = ao_tick_ms();
 
 #if defined(AO_MG_VERSION_614)
-    AO_DBG_DEBUG("use MG version %s (tested with 6.14)", MG_VERSION);
 
     struct mg_connect_opts opts;
     memset(&opts, 0, sizeof(opts));
@@ -197,7 +200,6 @@ void AOcppMongooseClient::maintainWsConn() {
     }
 
 #else
-    AO_DBG_DEBUG("use MG version %s (tested with 7.8)", MG_VERSION);
 
     websocket = mg_ws_connect(
         mgr, 
@@ -430,11 +432,10 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
         }
     } else if (ev == MG_EV_WS_OPEN) {
         // WS connection established. Perform MQTT login
-        MG_INFO(("Connected to WS"));
+        AO_DBG_INFO("connection %s -- connected!", osock->getUrl());
         osock->setConnectionOpen(true);
     } else if (ev == MG_EV_WS_MSG) {
         struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
-        MG_INFO(("GOT %d bytes WS msg", (int) wm->data.len));
         if (!osock->getReceiveTXTcallback()((const char*) wm->data.ptr, wm->data.len)) {
             AO_DBG_WARN("processing input message failed");
         }
@@ -444,7 +445,7 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     }
 
     if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
-        MG_INFO(("Connected ended"));
+        AO_DBG_INFO("connection %s -- closed", osock->getUrl());
         osock->cleanConnection();
     }
 }
