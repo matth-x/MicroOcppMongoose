@@ -12,8 +12,8 @@
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
 
-#if defined(AO_MG_VERSION_614)
-#define MG_F_IS_AOcppMongooseClient MG_F_USER_2
+#ifndef AO_MG_F_IS_AOcppMongooseClient
+#define AO_MG_F_IS_AOcppMongooseClient MG_F_USER_2
 #endif
 
 using namespace ArduinoOcpp;
@@ -91,8 +91,11 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
 }
 
 AOcppMongooseClient::~AOcppMongooseClient() {
-    if (websocket)
-        AO_DBG_ERR("must close mg connection before destructing ocpp socket");
+    AO_DBG_DEBUG("destruct AOcppMongooseClient");
+    if (websocket) {
+        reconnect(); //close WS connection, won't be reopened
+        websocket->flags &= ~AO_MG_F_IS_AOcppMongooseClient;
+    }
 }
 
 void AOcppMongooseClient::loop() {
@@ -194,11 +197,6 @@ void AOcppMongooseClient::maintainWsConn() {
         url.c_str(),
         "ocpp1.6",
         *extra_headers ? extra_headers : nullptr);
-    
-    if (websocket) {
-        websocket->flags |= MG_F_IS_AOcppMongooseClient;
-    }
-
 #else
 
     websocket = mg_ws_connect(
@@ -210,6 +208,11 @@ void AOcppMongooseClient::maintainWsConn() {
                       basic_auth64.empty() ? "" : "\r\nAuthorization: Basic ", 
                       basic_auth64.empty() ? "" : basic_auth64.c_str());     // Create client
 #endif
+
+    if (websocket) {
+        websocket->flags |= AO_MG_F_IS_AOcppMongooseClient;
+    }
+
 }
 
 void AOcppMongooseClient::reload_credentials() {
@@ -360,7 +363,7 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
 
     AOcppMongooseClient *osock = nullptr;
     
-    if (nc->flags & MG_F_IS_WEBSOCKET && nc->flags & MG_F_IS_AOcppMongooseClient) {
+    if (nc->flags & MG_F_IS_WEBSOCKET && nc->flags & AO_MG_F_IS_AOcppMongooseClient) {
         osock = reinterpret_cast<AOcppMongooseClient*>(user_data);
     } else {
         return;
