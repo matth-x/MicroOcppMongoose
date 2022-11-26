@@ -12,7 +12,7 @@
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
 
-#ifndef AO_MG_F_IS_AOcppMongooseClient
+#if defined(AO_MG_VERSION_614)
 #define AO_MG_F_IS_AOcppMongooseClient MG_F_USER_2
 #endif
 
@@ -94,7 +94,11 @@ AOcppMongooseClient::~AOcppMongooseClient() {
     AO_DBG_DEBUG("destruct AOcppMongooseClient");
     if (websocket) {
         reconnect(); //close WS connection, won't be reopened
+#if defined(AO_MG_VERSION_614)
         websocket->flags &= ~AO_MG_F_IS_AOcppMongooseClient;
+#else
+        websocket->fn_data = NULL;
+#endif
     }
 }
 
@@ -197,6 +201,11 @@ void AOcppMongooseClient::maintainWsConn() {
         url.c_str(),
         "ocpp1.6",
         *extra_headers ? extra_headers : nullptr);
+
+    if (websocket) {
+        websocket->flags |= AO_MG_F_IS_AOcppMongooseClient;
+    }
+
 #else
 
     websocket = mg_ws_connect(
@@ -208,10 +217,6 @@ void AOcppMongooseClient::maintainWsConn() {
                       basic_auth64.empty() ? "" : "\r\nAuthorization: Basic ", 
                       basic_auth64.empty() ? "" : basic_auth64.c_str());     // Create client
 #endif
-
-    if (websocket) {
-        websocket->flags |= AO_MG_F_IS_AOcppMongooseClient;
-    }
 
 }
 
@@ -405,6 +410,10 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
             osock->updateRcvTimer();
             break;
         }
+        case MG_EV_WEBSOCKET_CONTROL_FRAME: {
+            osock->updateRcvTimer();
+            break;
+        }
         case MG_EV_CLOSE: {
             AO_DBG_INFO("connection %s -- closed", osock->getUrl());
             osock->cleanConnection();
@@ -416,8 +425,26 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
 #else
 
 void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
-    if (ev != 2) printf("[MG] Cb fn with event: %d\n", ev);
+    if (ev != 2) {
+        AO_DBG_VERBOSE("Cb fn with event: %d\n", ev);
+        (void)0;
+    }
+
     AOcppMongooseClient *osock = reinterpret_cast<AOcppMongooseClient*>(fn_data);
+    if (!osock) {
+        if (ev == MG_EV_CLOSE) {
+            AO_DBG_INFO("connection closed");
+            (void)0;
+        } else if (ev == MG_EV_ERROR) {
+            AO_DBG_INFO("connection closed with error");
+            (void)0;
+        } else {
+            AO_DBG_ERR("invalid state %d", ev);
+            (void)0;
+        }
+        return;
+    }
+
     if (ev == MG_EV_ERROR) {
         // On error, log error message
         MG_ERROR(("%p %s", c->fd, (char *) ev_data));
