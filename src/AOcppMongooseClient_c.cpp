@@ -10,14 +10,18 @@
 
 using namespace ArduinoOcpp;
 
-AOcppSocketHandle *ao_makeOcppSocket(struct mg_mgr *mgr,
+AOcppSocket *ao_makeOcppSocket(struct mg_mgr *mgr,
         const char *backend_url_default,
         const char *charge_box_id_default,
         const char *auth_key_default,
         const char *CA_cert_default,
         AO_FilesystemOpt fsopt) {
     
-    auto filesystem = makeDefaultFilesystemAdapter(fsopt);
+    std::shared_ptr<ArduinoOcpp::FilesystemAdapter> filesystem;
+    
+    if (fsopt.use) {
+        filesystem = makeDefaultFilesystemAdapter(fsopt);
+    }
 
     auto sock = new AOcppMongooseClient(mgr,
             backend_url_default,
@@ -26,10 +30,10 @@ AOcppSocketHandle *ao_makeOcppSocket(struct mg_mgr *mgr,
             CA_cert_default,
             filesystem);
     
-    return reinterpret_cast<AOcppSocketHandle*>(sock);;
+    return reinterpret_cast<AOcppSocket*>(sock);;
 }
 
-void ao_setBackendUrl(AOcppSocketHandle *sock, const char *backend_url) {
+void ao_setBackendUrl(AOcppSocket *sock, const char *backend_url) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return;
@@ -38,7 +42,7 @@ void ao_setBackendUrl(AOcppSocketHandle *sock, const char *backend_url) {
     mgsock->setBackendUrl(backend_url);
 }
 
-void ao_setChargeBoxId(AOcppSocketHandle *sock, const char *cb_id) {
+void ao_setChargeBoxId(AOcppSocket *sock, const char *cb_id) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return;
@@ -47,7 +51,7 @@ void ao_setChargeBoxId(AOcppSocketHandle *sock, const char *cb_id) {
     mgsock->setChargeBoxId(cb_id);
 }
 
-void ao_setAuthKey(AOcppSocketHandle *sock, const char *auth_key) {
+void ao_setAuthKey(AOcppSocket *sock, const char *auth_key) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return;
@@ -56,7 +60,7 @@ void ao_setAuthKey(AOcppSocketHandle *sock, const char *auth_key) {
     mgsock->setAuthKey(auth_key);
 }
 
-void ao_setCaCert(AOcppSocketHandle *sock, const char *ca_cert) {
+void ao_setCaCert(AOcppSocket *sock, const char *ca_cert) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return;
@@ -65,7 +69,7 @@ void ao_setCaCert(AOcppSocketHandle *sock, const char *ca_cert) {
     mgsock->setCaCert(ca_cert);
 }
 
-void ao_reconnect(AOcppSocketHandle *sock) {
+void ao_reconnect(AOcppSocket *sock) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return;
@@ -74,7 +78,7 @@ void ao_reconnect(AOcppSocketHandle *sock) {
     mgsock->reconnect();
 }
 
-const char *ao_getBackendUrl(AOcppSocketHandle *sock) {
+const char *ao_getBackendUrl(AOcppSocket *sock) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return nullptr;
@@ -83,7 +87,7 @@ const char *ao_getBackendUrl(AOcppSocketHandle *sock) {
     return mgsock->getBackendUrl();
 }
 
-const char *ao_getChargeBoxId(AOcppSocketHandle *sock) {
+const char *ao_getChargeBoxId(AOcppSocket *sock) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return nullptr;
@@ -92,7 +96,7 @@ const char *ao_getChargeBoxId(AOcppSocketHandle *sock) {
     return mgsock->getChargeBoxId();
 }
 
-const char *ao_getAuthKey(AOcppSocketHandle *sock) {
+const char *ao_getAuthKey(AOcppSocket *sock) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return nullptr;
@@ -101,7 +105,7 @@ const char *ao_getAuthKey(AOcppSocketHandle *sock) {
     return mgsock->getAuthKey();
 }
 
-const char *ao_getCaCert(AOcppSocketHandle *sock) {
+const char *ao_getCaCert(AOcppSocket *sock) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
         return nullptr;
