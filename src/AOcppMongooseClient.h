@@ -5,6 +5,11 @@
 #ifndef AOCPPMONGOOSECLIENT_H
 #define AOCPPMONGOOSECLIENT_H
 
+#if defined(ARDUINO) //fix for conflicting defitions of IPAddress on Arduino
+#include <Arduino.h>
+#include <IPAddress.h>
+#endif
+
 #include "mongoose.h"
 #include <ArduinoOcpp/Core/OcppSocket.h>
 
