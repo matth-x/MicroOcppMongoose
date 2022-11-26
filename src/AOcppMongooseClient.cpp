@@ -96,8 +96,9 @@ AOcppMongooseClient::~AOcppMongooseClient() {
         reconnect(); //close WS connection, won't be reopened
 #if defined(AO_MG_VERSION_614)
         websocket->flags &= ~AO_MG_F_IS_AOcppMongooseClient;
+        websocket->user_data = nullptr;
 #else
-        websocket->fn_data = NULL;
+        websocket->fn_data = nullptr;
 #endif
     }
 }
@@ -368,7 +369,7 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
 
     AOcppMongooseClient *osock = nullptr;
     
-    if (nc->flags & MG_F_IS_WEBSOCKET && nc->flags & AO_MG_F_IS_AOcppMongooseClient) {
+    if (user_data && nc->flags & MG_F_IS_WEBSOCKET && nc->flags & AO_MG_F_IS_AOcppMongooseClient) {
         osock = reinterpret_cast<AOcppMongooseClient*>(user_data);
     } else {
         return;
@@ -432,11 +433,8 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
 
     AOcppMongooseClient *osock = reinterpret_cast<AOcppMongooseClient*>(fn_data);
     if (!osock) {
-        if (ev == MG_EV_CLOSE) {
-            AO_DBG_INFO("connection closed");
-            (void)0;
-        } else if (ev == MG_EV_ERROR) {
-            AO_DBG_INFO("connection closed with error");
+        if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
+            AO_DBG_INFO("connection %s", ev == MG_EV_CLOSE ? "closed" : "error");
             (void)0;
         } else {
             AO_DBG_ERR("invalid state %d", ev);
@@ -475,7 +473,7 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     }
 
     if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
-        AO_DBG_INFO("connection %s -- closed", osock->getUrl());
+        AO_DBG_INFO("connection %s -- %s", osock->getUrl(), ev == MG_EV_CLOSE ? "closed" : "error");
         osock->cleanConnection();
     }
 }
