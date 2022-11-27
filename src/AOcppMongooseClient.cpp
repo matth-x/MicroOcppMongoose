@@ -7,7 +7,7 @@
 #include <ArduinoOcpp/Core/Configuration.h>
 #include <ArduinoOcpp/Debug.h>
 
-#define OCPP_CREDENTIALS_FN AO_FILENAME_PREFIX "/ocpp-creds.jsn"
+#define OCPP_CREDENTIALS_FN "/ocpp-creds.jsn"
 
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
@@ -35,7 +35,7 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
 
         //all credentials are persistent over reboots
 
-        fn = OCPP_CREDENTIALS_FN;
+        fn = AO_FILENAME_PREFIX OCPP_CREDENTIALS_FN;
         write_permission = true;
     } else {
         //make the credentials non-persistent
