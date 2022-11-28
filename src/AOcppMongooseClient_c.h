@@ -27,6 +27,8 @@ AOcppSocket *ao_makeOcppSocket(struct mg_mgr *mgr,
         const char *CA_cert_default, //if AO_CA_CERT_USE_FILE, then pass the filename, otherwise the plain-text CA_cert
         struct AO_FilesystemOpt fsopt);
 
+void ao_deinitOcppSocket(AOcppSocket *sock);
+
 void ao_setBackendUrl(AOcppSocket *sock, const char *backend_url);
 void ao_setChargeBoxId(AOcppSocket *sock, const char *cb_id);
 void ao_setAuthKey(AOcppSocket *sock, const char *auth_key);

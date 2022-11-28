@@ -33,6 +33,11 @@ AOcppSocket *ao_makeOcppSocket(struct mg_mgr *mgr,
     return reinterpret_cast<AOcppSocket*>(sock);;
 }
 
+void ao_deinitOcppSocket(AOcppSocket *sock) {
+    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    delete mgsock;
+}
+
 void ao_setBackendUrl(AOcppSocket *sock, const char *backend_url) {
     if (!sock) {
         AO_DBG_ERR("invalid argument");
