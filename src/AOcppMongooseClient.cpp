@@ -63,7 +63,7 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
     ws_ping_interval = declareConfiguration<int>(
         "WebSocketPingInterval", 5, fn, true, true, true, true);
     reconnect_interval = declareConfiguration<int>(
-        "AO_ReconnectInterval", 120, fn, true, true, true, true);
+        "AO_ReconnectInterval", 10, fn, true, true, true, true);
 
     configuration_save();
 
@@ -184,14 +184,14 @@ void AOcppMongooseClient::maintainWsConn() {
 
     const char *ca_string = ca_cert.empty() ? "*" : ca_cert.c_str();
 
-    //Check if SSL is disabled
-    unsigned int port_i = 0;
-    struct mg_str scheme, query, fragment;
-    if (!mg_parse_uri(mg_mk_str(url.c_str()), &scheme, NULL, NULL, &port_i, NULL, &query, &fragment)) {
-        if (scheme.len > 0 && (!strcmp("ws", scheme.p))) {
-            //yes, disable SSL
-            ca_string = nullptr;
-        }
+    //Check if SSL is disabled, i.e. if URL starts with "ws:"
+    if (url.length() >= strlen("ws:") &&
+            tolower(url.c_str()[0]) == 'w' &&
+            tolower(url.c_str()[1]) == 's' &&
+            url.c_str()[2] == ':') {
+        //yes, disable SSL
+        ca_string = nullptr;
+        AO_DBG_WARN("Insecure connection (WS)");
     }
 
     opts.ssl_ca_cert = ca_string;
