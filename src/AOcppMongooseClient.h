@@ -21,8 +21,8 @@
  * a file on the flash filesystem, define the following build flag as 1 and
  * pass the filename to the constructor instead of a default plain-text certificate.
 */
-#ifndef AO_CA_CERT_USE_FILE
-#define AO_CA_CERT_USE_FILE 0
+#ifndef AO_CA_CERT_LOCAL
+#define AO_CA_CERT_LOCAL 0
 #endif
 
 namespace ArduinoOcpp {
@@ -43,7 +43,7 @@ private:
     std::shared_ptr<Configuration<const char*>> setting_backend_url;
     std::shared_ptr<Configuration<const char*>> setting_cb_id;
     std::shared_ptr<Configuration<const char*>> setting_auth_key;
-#if !AO_CA_CERT_USE_FILE
+#if !AO_CA_CERT_LOCAL
     std::shared_ptr<Configuration<const char*>> setting_ca_cert;
 #endif
     unsigned long last_status_dbg_msg {0}, last_recv {0};
@@ -65,7 +65,7 @@ public:
             const char *backend_url_default = nullptr, 
             const char *charge_box_id_default = nullptr,
             const char *auth_key_default = nullptr,
-            const char *CA_cert_default = nullptr, //if AO_CA_CERT_USE_FILE, then pass the filename, otherwise the plain-text CA_cert
+            const char *CA_cert_default = nullptr, //forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
             std::shared_ptr<ArduinoOcpp::FilesystemAdapter> filesystem = nullptr);
 
     ~AOcppMongooseClient();
@@ -85,7 +85,7 @@ public:
     void setBackendUrl(const char *backend_url);
     void setChargeBoxId(const char *cb_id);
     void setAuthKey(const char *auth_key);
-    void setCaCert(const char *ca_cert); //if AO_CA_CERT_USE_FILE, then pass the filename, otherwise the plain-text CA_cert
+    void setCaCert(const char *ca_cert); //forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
 
     void reconnect(); //after updating all credentials, reconnect to apply them
 

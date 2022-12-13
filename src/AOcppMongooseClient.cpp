@@ -54,7 +54,7 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
     setting_auth_key = declareConfiguration<const char*>(
         "AuthorizationKey", auth_key_default ? auth_key_default : "",
         fn, write_permission, true, true, true);
-#if !AO_CA_CERT_USE_FILE
+#if !AO_CA_CERT_LOCAL
     setting_ca_cert = declareConfiguration<const char*>(
         "AO_CaCert", CA_cert_default ? CA_cert_default : "",
         fn, write_permission, true, true, true);
@@ -74,7 +74,7 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
     auth_key = setting_auth_key && *setting_auth_key ? *setting_auth_key : 
         (auth_key_default ? auth_key_default : "");
     
-#if !AO_CA_CERT_USE_FILE
+#if !AO_CA_CERT_LOCAL
     ca_cert = setting_ca_cert && *setting_ca_cert ? *setting_ca_cert : 
         (CA_cert_default ? CA_cert_default : "");
 #else
@@ -182,7 +182,19 @@ void AOcppMongooseClient::maintainWsConn() {
     struct mg_connect_opts opts;
     memset(&opts, 0, sizeof(opts));
 
-    opts.ssl_ca_cert = ca_cert.empty() ? "*" : ca_cert.c_str();
+    const char *ca_string = ca_cert.empty() ? "*" : ca_cert.c_str();
+
+    //Check if SSL is disabled
+    unsigned int port_i = 0;
+    struct mg_str scheme, query, fragment;
+    if (!mg_parse_uri(mg_mk_str(url.c_str()), &scheme, NULL, NULL, &port_i, NULL, &query, &fragment)) {
+        if (scheme.len > 0 && (!strcmp("ws", scheme.p))) {
+            //yes, disable SSL
+            ca_string = nullptr;
+        }
+    }
+
+    opts.ssl_ca_cert = ca_string;
 
     char extra_headers [128] = {'\0'};
 
@@ -318,7 +330,7 @@ void AOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
     }
     ca_cert = ca_cert_cstr;
 
-#if !AO_CA_CERT_USE_FILE
+#if !AO_CA_CERT_LOCAL
     if (setting_ca_cert) {
         *setting_ca_cert = ca_cert_cstr;
         configuration_save();
@@ -449,11 +461,12 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     } else if (ev == MG_EV_CONNECT) {
         // If target URL is SSL/TLS, command client connection to use TLS
         if (mg_url_is_ssl(osock->getUrl())) {
-#if AO_CA_CERT_USE_FILE
-            struct mg_tls_opts opts = {.ca = osock->getCaCert()}; //CaCert is filename
-#else
-            struct mg_tls_opts opts = {.cert = osock->getCaCert()}; //CaCert is plain-text cert
-#endif
+            const char *ca_string = osock->getCaCert();
+            if (ca_string && *ca_string == '\0') { //check if certificate validation is disabled by passing an empty string
+                //yes, disabled
+                ca_string = nullptr;
+            }
+            struct mg_tls_opts opts = {.ca = ca_string};
             mg_tls_init(c, &opts);
         } else {
             AO_DBG_WARN("Insecure connection (WS)");
