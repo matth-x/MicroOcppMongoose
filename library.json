@@ -1,0 +1,38 @@
+{
+    "name": "ArduinoOcppMongoose",
+    "version": "0.0.1",
+    "description": "Mongoose Adapter for the ArduinoOcpp Client",
+    "keywords": "OCPP, 1.6, OCPP 1.6, Smart Energy, Smart Charging, client, ESP8266, ESP32, Arduino, EVSE, Charge Point, Mongoose",
+    "repository":
+    {
+        "type": "git",
+        "url": "https://github.com/matth-x/ArduinoOcppMongoose/"
+    },
+    "authors":
+    [
+      {
+        "name": "Matthias Akstaller",
+        "url": "https://www.arduino-ocpp.com",
+        "maintainer": true
+      }
+    ],
+    "license": "GPL-3.0",
+    "homepage": "https://www.arduino-ocpp.com",
+    "frameworks": "arduino,espidf",
+    "platforms": "espressif8266, espressif32",
+    "export": {
+        "include":
+        [
+            "src/ArduinoOcppMongooseClient_c.cpp",
+            "src/ArduinoOcppMongooseClient_c.h",
+            "src/ArduinoOcppMongooseClient.cpp",
+            "src/ArduinoOcppMongooseClient.h",
+            "src/base64.hpp",
+            "CMakeLists.txt",
+            "library.json",
+            "LICENSE",
+            "README.md"
+        ]
+    }
+
+  }
