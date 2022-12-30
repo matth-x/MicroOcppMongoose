@@ -1,6 +1,6 @@
 set(AO_MG_SRC
-    src/AOcppMongooseClient_c.cpp
-    src/AOcppMongooseClient.cpp
+    src/ArduinoOcppMongooseClient_c.cpp
+    src/ArduinoOcppMongooseClient.cpp
 )
 
 idf_component_register(SRCS ${AO_MG_SRC}

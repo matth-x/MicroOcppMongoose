@@ -1,4 +1,4 @@
-// matth-x/AOcppMongoose
+// matth-x/ArduinoOcppMongoose
 // Copyright Matthias Akstaller 2019 - 2022
 // GPL-3.0 License (see LICENSE)
 

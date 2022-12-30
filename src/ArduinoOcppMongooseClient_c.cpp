@@ -1,9 +1,9 @@
-// matth-x/AOcppMongoose
+// matth-x/ArduinoOcppMongoose
 // Copyright Matthias Akstaller 2019 - 2022
 // GPL-3.0 License (see LICENSE)
 
-#include "AOcppMongooseClient_c.h"
-#include "AOcppMongooseClient.h"
+#include "ArduinoOcppMongooseClient_c.h"
+#include "ArduinoOcppMongooseClient.h"
 
 #include <ArduinoOcpp/Core/FilesystemAdapter.h>
 #include <ArduinoOcpp/Debug.h>
