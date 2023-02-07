@@ -118,3 +118,12 @@ const char *ao_getCaCert(AOcppSocket *sock) {
     auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
     return mgsock->getCaCert();
 }
+
+bool ao_isConnectionOpen(AOcppSocket *sock) {
+    if (!sock) {
+        AO_DBG_ERR("invalid argument");
+        return nullptr;
+    }
+    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    return mgsock->isConnectionOpen();
+}

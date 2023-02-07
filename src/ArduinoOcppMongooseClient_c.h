@@ -41,6 +41,8 @@ const char *ao_getChargeBoxId(AOcppSocket *sock);
 const char *ao_getAuthKey(AOcppSocket *sock);
 const char *ao_getCaCert(AOcppSocket *sock);
 
+bool ao_isConnectionOpen(AOcppSocket *sock);
+
 #ifdef __cplusplus
 }
 #endif
