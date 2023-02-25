@@ -375,6 +375,10 @@ void AOcppMongooseClient::updateRcvTimer() {
     last_recv = ao_tick_ms();
 }
 
+unsigned long AOcppMongooseClient::getLastRecv() {
+    return last_recv;
+}
+
 #if defined(AO_MG_VERSION_614)
 
 void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {

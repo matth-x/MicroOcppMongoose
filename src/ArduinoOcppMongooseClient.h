@@ -101,6 +101,7 @@ public:
     void cleanConnection();
 
     void updateRcvTimer();
+    unsigned long getLastRecv(); //get time of last successful receive in millis
 };
 
 }
