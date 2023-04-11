@@ -19,9 +19,9 @@ AOcppSocket *ao_makeOcppSocket(struct mg_mgr *mgr,
     
     std::shared_ptr<ArduinoOcpp::FilesystemAdapter> filesystem;
     
-    if (fsopt.use) {
-        filesystem = makeDefaultFilesystemAdapter(fsopt);
-    }
+#ifndef AO_DEACTIVATE_FLASH
+    filesystem = makeDefaultFilesystemAdapter(fsopt);
+#endif
 
     auto sock = new AOcppMongooseClient(mgr,
             backend_url_default,
