@@ -61,9 +61,11 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
 #endif
 
     ws_ping_interval = declareConfiguration<int>(
-        "WebSocketPingInterval", 5, fn, true, true, true, true);
+        "WebSocketPingInterval", 5, fn, true, true, true);
     reconnect_interval = declareConfiguration<int>(
-        "AO_ReconnectInterval", 10, fn, true, true, true, true);
+        "AO_ReconnectInterval", 10, fn, true, true, true);
+    stale_timeout = declareConfiguration<int>(
+        "AO_StaleTimeout", 300, fn, true, true, true);
 
     configuration_save();
 
@@ -143,6 +145,13 @@ void AOcppMongooseClient::maintainWsConn() {
             //WS connected but unresponsive
             AO_DBG_DEBUG("WS unresponsive");
         }
+    }
+
+    if (websocket && isConnectionOpen() &&
+            stale_timeout && *stale_timeout > 0 && ao_tick_ms() - last_recv >= (*stale_timeout * 1000UL)) {
+        AO_DBG_INFO("connection %s -- stale, reconnect", url.c_str());
+        reconnect();
+        return;
     }
 
     if (websocket && isConnectionOpen() &&
@@ -479,6 +488,7 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
         // WS connection established. Perform MQTT login
         AO_DBG_INFO("connection %s -- connected!", osock->getUrl());
         osock->setConnectionOpen(true);
+        osock->updateRcvTimer();
     } else if (ev == MG_EV_WS_MSG) {
         struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
         if (!osock->getReceiveTXTcallback()((const char*) wm->data.ptr, wm->data.len)) {

@@ -1,5 +1,5 @@
 // matth-x/ArduinoOcppMongoose
-// Copyright Matthias Akstaller 2019 - 2022
+// Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
 #ifndef AOCPPMONGOOSECLIENT_H
@@ -49,6 +49,7 @@ private:
     unsigned long last_status_dbg_msg {0}, last_recv {0};
     std::shared_ptr<Configuration<int>> reconnect_interval; //minimum time between two connect trials in s
     unsigned long last_reconnection_attempt {-1UL / 2UL};
+    std::shared_ptr<Configuration<int>> stale_timeout; //inactivity period after which the connection will be closed
     std::shared_ptr<Configuration<int>> ws_ping_interval; //heartbeat intervall in s. 0 sets hb off
     unsigned long last_hb {0};
     bool connection_established {false};
