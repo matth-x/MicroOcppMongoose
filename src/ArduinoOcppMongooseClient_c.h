@@ -1,5 +1,5 @@
 // matth-x/ArduinoOcppMongoose
-// Copyright Matthias Akstaller 2019 - 2022
+// Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
 #ifndef AOCPPMONGOOSECLIENT_C_H
@@ -24,7 +24,7 @@ AOcppSocket *ao_makeOcppSocket(struct mg_mgr *mgr,
         const char *backend_url_default,   //all cstrings can be NULL
         const char *charge_box_id_default,
         const char *auth_key_default,
-        const char *CA_cert_default, //if AO_CA_CERT_USE_FILE, then pass the filename, otherwise the plain-text CA_cert
+        const char *CA_cert_default,
         struct AO_FilesystemOpt fsopt);
 
 void ao_deinitOcppSocket(AOcppSocket *sock);
@@ -32,7 +32,7 @@ void ao_deinitOcppSocket(AOcppSocket *sock);
 void ao_setBackendUrl(AOcppSocket *sock, const char *backend_url);
 void ao_setChargeBoxId(AOcppSocket *sock, const char *cb_id);
 void ao_setAuthKey(AOcppSocket *sock, const char *auth_key);
-void ao_setCaCert(AOcppSocket *sock, const char *ca_cert); //if AO_CA_CERT_USE_FILE, then pass the filename, otherwise the plain-text CA_cert
+void ao_setCaCert(AOcppSocket *sock, const char *ca_cert);
 
 void ao_reconnect(AOcppSocket *sock); //after updating all credentials, reconnect to apply them
 

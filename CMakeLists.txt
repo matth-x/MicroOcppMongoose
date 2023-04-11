@@ -16,7 +16,7 @@ if(ESP_PLATFORM)
                         REQUIRES esp_timer mbedtls mongoose ArduinoOcpp)
 
     target_compile_definitions(${COMPONENT_LIB} PRIVATE 
-        AO_CA_CERT_USE_FILE=0)
+        )
 
     return()
 endif()
@@ -29,7 +29,6 @@ target_include_directories(ArduinoOcppMongoose PUBLIC
                             )
 
 target_compile_definitions(ArduinoOcppMongoose PRIVATE
-    AO_CA_CERT_USE_FILE=0
     )
 
 target_link_libraries(ArduinoOcppMongoose PUBLIC ArduinoOcpp)
