@@ -250,15 +250,13 @@ void AOcppMongooseClient::reload_credentials() {
         AO_DBG_DEBUG("empty URL closes connection");
         return;
     } else {
-        if (cb_id.empty()) {
-            url = backend_url;
-        } else {
-            if (backend_url.back() != '/') {
-                backend_url.append("/");
-            }
+        url = backend_url;
 
-            url = backend_url + cb_id;
+        if (url.back() != '/' && !cb_id.empty()) {
+            url.append("/");
         }
+
+        url.append(cb_id);
     }
 
     if (!auth_key.empty()) {
