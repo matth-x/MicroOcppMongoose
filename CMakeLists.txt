@@ -7,6 +7,7 @@ cmake_minimum_required(VERSION 3.15)
 set(AO_MG_SRC
     src/ArduinoOcppMongooseClient_c.cpp
     src/ArduinoOcppMongooseClient.cpp
+    src/FtpClient.cpp
 )
 
 if(ESP_PLATFORM)
