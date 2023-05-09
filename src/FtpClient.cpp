@@ -44,12 +44,77 @@ FtpClient::~FtpClient() {
     }
 }
 
-bool FtpClient::getFile(const char *ftp_url, std::function<bool(const char *data, size_t len)> onReceiveChunk, std::function<void()> onClose) {
+bool FtpClient::getFile(const char *ftp_url_raw, std::function<bool(const char *data, size_t len)> onReceiveChunk, std::function<void()> onClose) {
+    if (!ftp_url_raw) {
+        AO_DBG_DEBUG("invalid args");
+        return false;
+    }
+
+    AO_DBG_DEBUG("init download %s", ftp_url_raw);// ftp://[user[:pass]@]host:port/directory/filename
+
+    std::string ftp_url = ftp_url_raw; //copy input ftp_url
+
+    //tolower protocol specifier
+    for (auto c = ftp_url.begin(); *c != ':' && c != ftp_url.end(); c++) {
+        *c = tolower(*c);
+    }
+
+    //check if protocol supported
+    if (!strncmp(ftp_url.c_str(), "ftps", strlen("ftps"))) {
+        AO_DBG_ERR("no TLS support. Please use ftp://");
+        return false;
+    } else if (strncmp(ftp_url.c_str(), "ftp://", strlen("ftp://"))) {
+        AO_DBG_ERR("protocol not supported. Please use ftp://");
+        return false;
+    }
+
+    //parse FTP URL: dir and fname
+    auto dir_pos = ftp_url.find_first_of('/', strlen("ftp://"));
+    if (dir_pos != std::string::npos) {
+        auto fname_pos = ftp_url.find_last_of('/');
+        dir = ftp_url.substr(dir_pos, fname_pos - dir_pos);
+        fname = ftp_url.substr(fname_pos + 1);
+    }
     
-    AO_DBG_DEBUG("init download");
-    url = "";
-    dir = "";
-    fname = "";
+    if (fname.empty()) {
+        AO_DBG_ERR("missing filename");
+        return false;
+    }
+    
+    AO_DBG_DEBUG("parsed dir: %s; fname: %s", dir.c_str(), fname.c_str());
+
+    //parse FTP URL: user, pass, host, port
+
+    std::string user_pass_host_port = ftp_url.substr(strlen("ftp://"), dir_pos - strlen("ftp://"));
+    std::string user_pass, host_port;
+    auto user_pass_delim = user_pass_host_port.find_first_of('@');
+    if (user_pass_delim != std::string::npos) {
+        host_port = user_pass_host_port.substr(user_pass_delim + 1);
+        user_pass = user_pass_host_port.substr(0, user_pass_delim);
+    } else {
+        host_port = user_pass_host_port;
+    }
+
+    if (!user_pass.empty()) {
+        auto user_delim = user_pass.find_first_of(':');
+        if (user_delim != std::string::npos) {
+            user = user_pass.substr(0, user_delim);
+            pass = user_pass.substr(user_delim + 1);
+        } else {
+            user = user_pass;
+        }
+    }
+
+    AO_DBG_DEBUG("parsed user: %s; pass: %s", user.c_str(), pass.c_str());
+
+    if (!host_port.empty()) {
+        url = std::string("tcp://") + host_port;
+    } else {
+        AO_DBG_ERR("missing hostname");
+        return false;
+    }
+
+    AO_DBG_DEBUG("parsed ctrl_ch URL: %s", url.c_str());
 
     if (ctrl_conn) {
         AO_DBG_DEBUG("close dangling ctrl channel");
