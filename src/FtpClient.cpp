@@ -11,15 +11,25 @@ using namespace ArduinoOcpp;
 void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 
-void close_mg_conn(mg_connection *c) {
 #if defined(AO_MG_VERSION_614)
+void close_mg_conn(mg_connection *c) {
     c->user_data = nullptr;
     c->flags |= MG_F_SEND_AND_CLOSE;
+}
+
+#define MG_COMPAT_EV_READ MG_EV_RECV
+#define MG_COMPAT_RECV recv_mbuf
+#define MG_COMPAT_SEND send_mbuf
 #else
+void close_mg_conn(mg_connection *c) {
     c->fn_data = nullptr;
     c->is_draining = 1;
-#endif
 }
+
+#define MG_COMPAT_EV_READ MG_EV_READ
+#define MG_COMPAT_RECV recv
+#define MG_COMPAT_SEND send
+#endif
 
 FtpClient::FtpClient(struct mg_mgr *mgr) : mgr(mgr) {
     AO_DBG_DEBUG("construct");
@@ -136,9 +146,22 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         (void)0;
     }
 
+#if defined(AO_MG_VERSION_614)
+    if (ev == MG_EV_CONNECT && *(int *) ev_data != 0) {
+        AO_DBG_WARN("connection error %d", *(int *) ev_data);
+        return;
+    }
+#else
+    if (ev == MG_EV_ERROR) {
+        MG_ERROR(("%p %s", c->fd, (char *) ev_data));
+        AO_DBG_WARN("connection error");
+        return;
+    }
+#endif
+
     if (!fn_data) {
-        if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
-            AO_DBG_INFO("connection %s", ev == MG_EV_CLOSE ? "closed" : "error");
+        if (ev == MG_EV_CLOSE) {
+            AO_DBG_INFO("connection closed");
             (void)0;
         } else {
             AO_DBG_ERR("invalid state %d", ev);
@@ -162,16 +185,16 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             session.onClose = nullptr;
         }
         (void)0;
-    } else if (ev == MG_EV_READ) {
+    } else if (ev == MG_COMPAT_EV_READ) {
         // read multi-line command
-        char *line_next = (char*) c->recv.buf;
-        while (line_next < (char*) c->recv.buf + c->recv.len) {
+        char *line_next = (char*) c->MG_COMPAT_RECV.buf;
+        while (line_next < (char*) c->MG_COMPAT_RECV.buf + c->MG_COMPAT_RECV.len) {
 
             // take current line
             char *line = line_next;
 
             // null-terminate current line and find begin of next line
-            while (line_next + 1 < (char*)c->recv.buf + c->recv.len && *line_next != '\n') {
+            while (line_next + 1 < (char*)c->MG_COMPAT_RECV.buf + c->MG_COMPAT_RECV.len && *line_next != '\n') {
                 line_next++;
             }
             *line_next = '\0';
@@ -203,16 +226,16 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
                 unsigned int h1 = 0, h2 = 0, h3 = 0, h4 = 0, p1 = 0, p2 = 0;
 
-                auto ret = sscanf((const char *)c->recv.buf + 3, "%u %u %u %u %u %u", &h1, &h2, &h3, &h4, &p1, &p2);
+                auto ret = sscanf((const char *)c->MG_COMPAT_RECV.buf + 3, "%u %u %u %u %u %u", &h1, &h2, &h3, &h4, &p1, &p2);
                 if (ret == 6) {
                     unsigned int port = 256U * p1 + p2;
 
                     char url [64] = {'\0'};
-                    auto ret = snprintf(url, 64, "tcp://%u.%u.%u.%u:%u/", h1, h2, h3, h4, port);
+                    auto ret = snprintf(url, 64, "tcp://%u.%u.%u.%u:%u", h1, h2, h3, h4, port);
                     if (ret < 0 || ret >= 64) {
                         AO_DBG_ERR("url format failure");
                         mg_printf(c, "QUIT\r\n");
-                        close_mg_conn(c);
+                        //close_mg_conn(c);
                         return;
                     }
                     AO_DBG_DEBUG("FTP upload address: %s", url);
@@ -229,7 +252,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     if (!session.data_conn) {
                         AO_DBG_ERR("cannot open data ch");
                         mg_printf(c, "QUIT\r\n");
-                        close_mg_conn(c);
+                        //close_mg_conn(c);
                         return;
                     }
 
@@ -237,7 +260,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 } else {
                     AO_DBG_ERR("could not process ftp data address");
                     mg_printf(c, "QUIT\r\n");
-                    close_mg_conn(c);
+                    //close_mg_conn(c);
                     return;
                 }
 
@@ -251,7 +274,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     session.data_conn = nullptr;
                 }
                 mg_printf(c, "QUIT\r\n");
-                close_mg_conn(c);
+                //close_mg_conn(c);
                 return;
             } else if (!strncmp("55", line, 2)) { // Requested action not taken / aborted
                 AO_DBG_DEBUG("file action error");
@@ -260,17 +283,13 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     session.data_conn = nullptr;
                 }
                 mg_printf(c, "QUIT\r\n");
-                close_mg_conn(c);
+                //close_mg_conn(c);
                 return;
             }
-            c->recv.len = 0;
+            c->MG_COMPAT_RECV.len = 0;
 
-            AO_DBG_DEBUG("--> %.*s", (int) c->send.len - 2, c->send.buf);
+            //AO_DBG_DEBUG("--> %.*s", (int) c->MG_COMPAT_SEND.len - 2, c->MG_COMPAT_SEND.buf);
         }
-    } else if (ev == MG_EV_ERROR) {
-        MG_ERROR(("%p %s", c->fd, (char *) ev_data));
-        AO_DBG_INFO("connection %s -- error", session.url.c_str());
-        (void)0;
     }
 }
 
@@ -280,9 +299,22 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         (void)0;
     }
 
+    #if defined(AO_MG_VERSION_614)
+    if (ev == MG_EV_CONNECT && *(int *) ev_data != 0) {
+        AO_DBG_WARN("connection error %d", *(int *) ev_data);
+        return;
+    }
+#else
+    if (ev == MG_EV_ERROR) {
+        MG_ERROR(("%p %s", c->fd, (char *) ev_data));
+        AO_DBG_WARN("connection error");
+        return;
+    }
+#endif
+
     if (!fn_data) {
-        if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
-            AO_DBG_INFO("connection %s", ev == MG_EV_CLOSE ? "closed" : "error");
+        if (ev == MG_EV_CLOSE) {
+            AO_DBG_INFO("connection closed");
             (void)0;
         } else {
             AO_DBG_ERR("invalid state %d", ev);
@@ -307,14 +339,12 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
     } else if (ev == MG_EV_CLOSE) {
         AO_DBG_INFO("connection %s -- closed", session.data_url.c_str());
         (void)0;
-    } else if (ev == MG_EV_READ) {
+    } else if (ev == MG_COMPAT_EV_READ) {
         //receive payload
         if (session.onReceiveChunk) {
-            session.onReceiveChunk((const char *)c->recv.buf, c->recv.len);
+            session.onReceiveChunk((const char *)c->MG_COMPAT_RECV.buf, c->MG_COMPAT_RECV.len);
         }
-    } else if (ev == MG_EV_ERROR) {
-        MG_ERROR(("%p %s", c->fd, (char *) ev_data));
-        AO_DBG_INFO("connection %s -- error", session.data_url.c_str());
-        (void)0;
     }
+
+    c->MG_COMPAT_RECV.len = 0;
 }
