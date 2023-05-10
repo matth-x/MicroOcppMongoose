@@ -32,7 +32,7 @@ public:
 
     std::string data_url;
 
-    std::function<bool(const char *data, size_t len)> onReceiveChunk;
+    std::function<size_t(const char *data, size_t len)> onReceiveChunk;
     std::function<void()> onClose;
 
     bool ctrl_opened = false;
@@ -42,8 +42,8 @@ public:
     FtpClient(struct mg_mgr *mgr);
     ~FtpClient();
 
-    bool getFile(const char *ftp_url, // ftp://[user[:pass]@]host:port/directory/filename)
-            std::function<bool(const char *data, size_t len)> onReceiveChunk,
+    bool getFile(const char *ftp_url, // ftp://[user[:pass]@]host[:port][/directory]/filename
+            std::function<size_t(const char *data, size_t len)> onReceiveChunk,
             std::function<void()> onClose);
 };
 
