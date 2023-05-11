@@ -12,7 +12,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 
 #if defined(AO_MG_VERSION_614)
-void close_mg_conn(mg_connection *c) {
+void mg_compat_drain_conn(mg_connection *c) {
     c->flags |= MG_F_SEND_AND_CLOSE;
 }
 
@@ -21,7 +21,7 @@ void close_mg_conn(mg_connection *c) {
 #define MG_COMPAT_SEND send_mbuf
 #define MG_COMPAT_FN_DATA user_data
 #else
-void close_mg_conn(mg_connection *c) {
+void mg_compat_drain_conn(mg_connection *c) {
     c->is_draining = 1;
 }
 
@@ -32,21 +32,19 @@ void close_mg_conn(mg_connection *c) {
 #endif
 
 MongooseFtpClient::MongooseFtpClient(struct mg_mgr *mgr) : mgr(mgr) {
-    AO_DBG_DEBUG("construct");
+    
 }
 
 MongooseFtpClient::~MongooseFtpClient() {
-    AO_DBG_DEBUG("destruct");
-
     if (data_conn) {
         data_conn->MG_COMPAT_FN_DATA = nullptr;
-        close_mg_conn(data_conn);
+        mg_compat_drain_conn(data_conn);
         data_conn = nullptr;
     }
 
     if (ctrl_conn) {
         ctrl_conn->MG_COMPAT_FN_DATA = nullptr;
-        close_mg_conn(ctrl_conn);
+        mg_compat_drain_conn(ctrl_conn);
         ctrl_conn = nullptr;
     }
 
@@ -58,7 +56,7 @@ MongooseFtpClient::~MongooseFtpClient() {
 
 bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned char *data, size_t len)> fileWriter, std::function<void()> onClose) {
     if (!ftp_url_raw || !fileWriter) {
-        AO_DBG_DEBUG("invalid args");
+        AO_DBG_ERR("invalid args");
         return false;
     }
 
@@ -69,9 +67,9 @@ bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(un
     }
 
     if (ctrl_conn) {
-        AO_DBG_DEBUG("close dangling ctrl channel");
+        AO_DBG_WARN("close dangling ctrl channel");
         ctrl_conn->MG_COMPAT_FN_DATA = nullptr;
-        close_mg_conn(ctrl_conn);
+        mg_compat_drain_conn(ctrl_conn);
         ctrl_conn = nullptr;
     }
 
@@ -90,7 +88,7 @@ bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(un
 
 bool MongooseFtpClient::postFile(const char *ftp_url_raw, std::function<size_t(unsigned char *out, size_t buffsize)> fileReader, std::function<void()> onClose) {
     if (!ftp_url_raw || !fileReader) {
-        AO_DBG_DEBUG("invalid args");
+        AO_DBG_ERR("invalid args");
         return false;
     }
 
@@ -101,9 +99,9 @@ bool MongooseFtpClient::postFile(const char *ftp_url_raw, std::function<size_t(u
     }
 
     if (ctrl_conn) {
-        AO_DBG_DEBUG("close dangling ctrl channel");
+        AO_DBG_WARN("close dangling ctrl channel");
         ctrl_conn->MG_COMPAT_FN_DATA = nullptr;
-        close_mg_conn(ctrl_conn);
+        mg_compat_drain_conn(ctrl_conn);
         ctrl_conn = nullptr;
     }
 
@@ -141,11 +139,11 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
     if (!fn_data) {
         if (ev == MG_EV_CLOSE) {
-            AO_DBG_INFO("connection closed");
+            AO_DBG_DEBUG("connection closed");
             (void)0;
         } else {
             AO_DBG_ERR("invalid state %d", ev);
-            close_mg_conn(c);
+            mg_compat_drain_conn(c);
             (void)0;
         }
         return;
@@ -155,10 +153,10 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
     if (ev == MG_EV_CONNECT) {
         AO_DBG_WARN("Insecure connection (FTP)");
-        AO_DBG_INFO("connection %s -- connected!", session.url.c_str());
+        AO_DBG_DEBUG("connection %s -- connected!", session.url.c_str());
         session.ctrl_opened = true;
     } else if (ev == MG_EV_CLOSE) {
-        AO_DBG_INFO("connection %s -- closed", session.url.c_str());
+        AO_DBG_DEBUG("connection %s -- closed", session.url.c_str());
         session.ctrl_closed = true;
         if (session.onClose) {
             session.onClose();
@@ -181,7 +179,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             *line_next = '\0';
             line_next++;
 
-            AO_DBG_DEBUG("<-- %s", line);
+            AO_DBG_DEBUG("RECV: %s", line);
 
             if (!strncmp("530", line, 3) // Not logged in
                     || !strncmp("220", line, 3)) {  // Service ready for new user
@@ -193,11 +191,11 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 mg_printf(c, "PASS %s\r\n", session.pass.c_str());
                 break;
             } else if (!strncmp("230", line, 3)) { // User logged in, proceed
-                AO_DBG_DEBUG("select directory %s", session.dir.empty() ? "/" : session.dir.c_str());
+                AO_DBG_VERBOSE("select directory %s", session.dir.empty() ? "/" : session.dir.c_str());
                 mg_printf(c, "CWD %s\r\n", session.dir.empty() ? "/" : session.dir.c_str());
                 break;
             } else if (!strncmp("250", line, 3)) { // Requested file action okay, completed
-                AO_DBG_DEBUG("enter passive mode");
+                AO_DBG_VERBOSE("enter passive mode");
                 mg_printf(c, "PASV\r\n");
                 break;
             } else if (!strncmp("227", line, 3)) { // Entering Passive Mode (h1,h2,h3,h4,p1,p2)
@@ -220,16 +218,16 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     if (ret < 0 || ret >= 64) {
                         AO_DBG_ERR("url format failure");
                         mg_printf(c, "QUIT\r\n");
-                        close_mg_conn(c);
+                        mg_compat_drain_conn(c);
                         break;
                     }
                     AO_DBG_DEBUG("FTP upload address: %s", url);
                     session.data_url = url;
 
                     if (session.data_conn) {
-                        AO_DBG_DEBUG("close dangling data channel");
+                        AO_DBG_WARN("close dangling data channel");
                         session.data_conn->MG_COMPAT_FN_DATA = nullptr;
-                        close_mg_conn(session.data_conn);
+                        mg_compat_drain_conn(session.data_conn);
                         session.data_conn_accepted = false;
                         session.data_conn = nullptr;
                     }
@@ -239,7 +237,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     if (!session.data_conn) {
                         AO_DBG_ERR("cannot open data ch");
                         mg_printf(c, "QUIT\r\n");
-                        close_mg_conn(c);
+                        mg_compat_drain_conn(c);
                         break;
                     }
 
@@ -247,37 +245,37 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 } else {
                     AO_DBG_ERR("could not process ftp data address");
                     mg_printf(c, "QUIT\r\n");
-                    close_mg_conn(c);
+                    mg_compat_drain_conn(c);
                     break;
                 }
 
             } else if (!strncmp("150", line, 3)) { // File status okay; about to open data connection
-                AO_DBG_DEBUG("open data connection");
+                AO_DBG_DEBUG("data connection accepted");
                 session.data_conn_accepted = true;
                 (void)0;
             } else if (!strncmp("226", line, 3)) { // Closing data connection. Requested file action successful (for example, file transfer or file abort)
-                AO_DBG_DEBUG("file action success");
+                AO_DBG_INFO("FTP success: %s", line);
                 if (session.data_conn) {
-                    close_mg_conn(session.data_conn);
+                    mg_compat_drain_conn(session.data_conn);
                 }
                 mg_printf(c, "QUIT\r\n");
-                close_mg_conn(c);
+                mg_compat_drain_conn(c);
                 break;
             } else if (!strncmp("55", line, 2)) { // Requested action not taken / aborted
-                AO_DBG_DEBUG("file action error");
+                AO_DBG_WARN("FTP failure: %s", line);
                 if (session.data_conn) {
-                    close_mg_conn(session.data_conn);
+                    mg_compat_drain_conn(session.data_conn);
                 }
                 mg_printf(c, "QUIT\r\n");
-                close_mg_conn(c);
+                mg_compat_drain_conn(c);
                 break;
             } else {
-                AO_DBG_ERR("unkown command");
+                AO_DBG_WARN("unkown commad (closing connection): %s", line);
                 if (session.data_conn) {
-                    close_mg_conn(session.data_conn);
+                    mg_compat_drain_conn(session.data_conn);
                 }
                 mg_printf(c, "QUIT\r\n");
-                close_mg_conn(c);
+                mg_compat_drain_conn(c);
                 break;
             }
 
@@ -319,7 +317,7 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             (void)0;
         } else {
             AO_DBG_ERR("invalid state %d", ev);
-            close_mg_conn(c);
+            mg_compat_drain_conn(c);
             (void)0;
         }
         return;
@@ -329,7 +327,7 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
     if (ev == MG_EV_CONNECT) {
         AO_DBG_WARN("Insecure connection (FTP)");
-        AO_DBG_INFO("connection %s -- connected!", session.data_url.c_str());
+        AO_DBG_DEBUG("connection %s -- connected!", session.data_url.c_str());
         if (session.method == MongooseFtpClient::Method::Retrieve) {
             AO_DBG_DEBUG("get file %s", session.fname.c_str());
             mg_printf(session.ctrl_conn, "RETR %s\r\n", session.fname.c_str());
@@ -341,7 +339,7 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             mg_printf(session.ctrl_conn, "QUIT\r\n");
         }
     } else if (ev == MG_EV_CLOSE) {
-        AO_DBG_INFO("connection %s -- closed", session.data_url.c_str());
+        AO_DBG_DEBUG("connection %s -- closed", session.data_url.c_str());
         session.data_conn_accepted = false;
         session.data_conn = nullptr;
         (void)0;
@@ -354,7 +352,7 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 AO_DBG_ERR("invalid state");
                 c->MG_COMPAT_RECV.len = 0;
                 mg_printf(session.ctrl_conn, "QUIT\r\n");
-                mg_close_conn(c);
+                mg_compat_drain_conn(c);
                 return;
             }
 
@@ -374,27 +372,23 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             if (!session.fileReader) {
                 AO_DBG_ERR("invalid state");
                 mg_printf(session.ctrl_conn, "QUIT\r\n");
-                mg_close_conn(c);
+                mg_compat_drain_conn(c);
                 return;
             }
 
             if (c->MG_COMPAT_SEND.len == 0) { //fill send buff
                 if (c->MG_COMPAT_SEND.size < 512) {
-                    AO_DBG_DEBUG("resize send buff");
                     mg_iobuf_resize(&c->MG_COMPAT_SEND, 512);
                 }
-                AO_DBG_DEBUG("write (max %zu bytes)", c->MG_COMPAT_SEND.size);
 
                 c->MG_COMPAT_SEND.len = session.fileReader(c->MG_COMPAT_SEND.buf, c->MG_COMPAT_SEND.size);
 
                 if (c->MG_COMPAT_SEND.len == 0) {
                     AO_DBG_DEBUG("finished file reading");
                     session.data_conn_accepted = false;
-                    mg_close_conn(c);
+                    mg_compat_drain_conn(c);
                     return;
                 }
-
-                AO_DBG_DEBUG("wrote %zu bytes", c->MG_COMPAT_SEND.len);
             }
         }
     }
@@ -430,7 +424,7 @@ bool MongooseFtpClient::readUrl(const char *ftp_url_raw) {
         return false;
     }
     
-    AO_DBG_DEBUG("parsed dir: %s; fname: %s", dir.c_str(), fname.c_str());
+    AO_DBG_VERBOSE("parsed dir: %s; fname: %s", dir.c_str(), fname.c_str());
 
     //parse FTP URL: user, pass, host, port
 
@@ -454,7 +448,7 @@ bool MongooseFtpClient::readUrl(const char *ftp_url_raw) {
         }
     }
 
-    AO_DBG_DEBUG("parsed user: %s; pass: %s", user.c_str(), pass.c_str());
+    AO_DBG_VERBOSE("parsed user: %s; pass: %s", user.c_str(), pass.c_str());
 
     if (host_port.empty()) {
         AO_DBG_ERR("missing hostname");
@@ -468,7 +462,7 @@ bool MongooseFtpClient::readUrl(const char *ftp_url_raw) {
 
     url = std::string("tcp://") + host_port;
 
-    AO_DBG_DEBUG("parsed ctrl_ch URL: %s", url.c_str());
+    AO_DBG_VERBOSE("parsed ctrl_ch URL: %s", url.c_str());
 
     return true;
 }
