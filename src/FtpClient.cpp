@@ -56,82 +56,17 @@ FtpClient::~FtpClient() {
     }
 }
 
-bool FtpClient::getFile(const char *ftp_url_raw, std::function<size_t(const char *data, size_t len)> onReceiveChunk, std::function<void()> onClose) {
-    if (!ftp_url_raw) {
+bool FtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned char *data, size_t len)> fileWriter, std::function<void()> onClose) {
+    if (!ftp_url_raw || !fileWriter) {
         AO_DBG_DEBUG("invalid args");
         return false;
     }
 
-    AO_DBG_DEBUG("init download %s", ftp_url_raw);// ftp://[user[:pass]@]host[:port][/directory]/filename
+    AO_DBG_DEBUG("init download %s", ftp_url_raw);
 
-    std::string ftp_url = ftp_url_raw; //copy input ftp_url
-
-    //tolower protocol specifier
-    for (auto c = ftp_url.begin(); *c != ':' && c != ftp_url.end(); c++) {
-        *c = tolower(*c);
-    }
-
-    //check if protocol supported
-    if (!strncmp(ftp_url.c_str(), "ftps", strlen("ftps"))) {
-        AO_DBG_ERR("no TLS support. Please use ftp://");
-        return false;
-    } else if (strncmp(ftp_url.c_str(), "ftp://", strlen("ftp://"))) {
-        AO_DBG_ERR("protocol not supported. Please use ftp://");
+    if (!readUrl(ftp_url_raw)) {
         return false;
     }
-
-    //parse FTP URL: dir and fname
-    auto dir_pos = ftp_url.find_first_of('/', strlen("ftp://"));
-    if (dir_pos != std::string::npos) {
-        auto fname_pos = ftp_url.find_last_of('/');
-        dir = ftp_url.substr(dir_pos, fname_pos - dir_pos);
-        fname = ftp_url.substr(fname_pos + 1);
-    }
-    
-    if (fname.empty()) {
-        AO_DBG_ERR("missing filename");
-        return false;
-    }
-    
-    AO_DBG_DEBUG("parsed dir: %s; fname: %s", dir.c_str(), fname.c_str());
-
-    //parse FTP URL: user, pass, host, port
-
-    std::string user_pass_host_port = ftp_url.substr(strlen("ftp://"), dir_pos - strlen("ftp://"));
-    std::string user_pass, host_port;
-    auto user_pass_delim = user_pass_host_port.find_first_of('@');
-    if (user_pass_delim != std::string::npos) {
-        host_port = user_pass_host_port.substr(user_pass_delim + 1);
-        user_pass = user_pass_host_port.substr(0, user_pass_delim);
-    } else {
-        host_port = user_pass_host_port;
-    }
-
-    if (!user_pass.empty()) {
-        auto user_delim = user_pass.find_first_of(':');
-        if (user_delim != std::string::npos) {
-            user = user_pass.substr(0, user_delim);
-            pass = user_pass.substr(user_delim + 1);
-        } else {
-            user = user_pass;
-        }
-    }
-
-    AO_DBG_DEBUG("parsed user: %s; pass: %s", user.c_str(), pass.c_str());
-
-    if (host_port.empty()) {
-        AO_DBG_ERR("missing hostname");
-        return false;
-    }
-
-    if (host_port.find(':') == std::string::npos) {
-        //use default port number
-        host_port.append(":21");
-    }
-
-    url = std::string("tcp://") + host_port;
-
-    AO_DBG_DEBUG("parsed ctrl_ch URL: %s", url.c_str());
 
     if (ctrl_conn) {
         AO_DBG_DEBUG("close dangling ctrl channel");
@@ -142,12 +77,47 @@ bool FtpClient::getFile(const char *ftp_url_raw, std::function<size_t(const char
 
     ctrl_conn = mg_connect(mgr, url.c_str(), ftp_ctrl_cb, this);
 
-    AO_DBG_DEBUG("control conn: %p", ctrl_conn);
+    if (!ctrl_conn) {
+        return false;
+    }
 
-    this->onReceiveChunk = onReceiveChunk;
+    this->method = Method::Retrieve;
+    this->fileWriter = fileWriter;
     this->onClose = onClose;
 
-    return ctrl_conn != nullptr;
+    return true;
+}
+
+bool FtpClient::postFile(const char *ftp_url_raw, std::function<size_t(unsigned char *out, size_t buffsize)> fileReader, std::function<void()> onClose) {
+    if (!ftp_url_raw || !fileReader) {
+        AO_DBG_DEBUG("invalid args");
+        return false;
+    }
+
+    AO_DBG_DEBUG("init upload %s", ftp_url_raw);
+
+    if (!readUrl(ftp_url_raw)) {
+        return false;
+    }
+
+    if (ctrl_conn) {
+        AO_DBG_DEBUG("close dangling ctrl channel");
+        ctrl_conn->MG_COMPAT_FN_DATA = nullptr;
+        close_mg_conn(ctrl_conn);
+        ctrl_conn = nullptr;
+    }
+
+    ctrl_conn = mg_connect(mgr, url.c_str(), ftp_ctrl_cb, this);
+
+    if (!ctrl_conn) {
+        return false;
+    }
+
+    this->method = Method::Append;
+    this->fileReader = fileReader;
+    this->onClose = onClose;
+
+    return true;
 }
 
 void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
@@ -260,6 +230,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                         AO_DBG_DEBUG("close dangling data channel");
                         session.data_conn->MG_COMPAT_FN_DATA = nullptr;
                         close_mg_conn(session.data_conn);
+                        session.data_conn_accepted = false;
                         session.data_conn = nullptr;
                     }
 
@@ -282,6 +253,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
             } else if (!strncmp("150", line, 3)) { // File status okay; about to open data connection
                 AO_DBG_DEBUG("open data connection");
+                session.data_conn_accepted = true;
                 (void)0;
             } else if (!strncmp("226", line, 3)) { // Closing data connection. Requested file action successful (for example, file transfer or file abort)
                 AO_DBG_DEBUG("file action success");
@@ -358,17 +330,35 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
     if (ev == MG_EV_CONNECT) {
         AO_DBG_WARN("Insecure connection (FTP)");
         AO_DBG_INFO("connection %s -- connected!", session.data_url.c_str());
-        AO_DBG_DEBUG("fetch file %s", session.fname.c_str());
-        mg_printf(session.ctrl_conn, "RETR %s\r\n", session.fname.c_str());
+        if (session.method == FtpClient::Method::Retrieve) {
+            AO_DBG_DEBUG("get file %s", session.fname.c_str());
+            mg_printf(session.ctrl_conn, "RETR %s\r\n", session.fname.c_str());
+        } else if (session.method == FtpClient::Method::Append) {
+            AO_DBG_DEBUG("post file %s", session.fname.c_str());
+            mg_printf(session.ctrl_conn, "APPE %s\r\n", session.fname.c_str());
+        } else {
+            AO_DBG_ERR("unsupported method");
+            mg_printf(session.ctrl_conn, "QUIT\r\n");
+        }
     } else if (ev == MG_EV_CLOSE) {
         AO_DBG_INFO("connection %s -- closed", session.data_url.c_str());
+        session.data_conn_accepted = false;
         session.data_conn = nullptr;
         (void)0;
     } else if (ev == MG_COMPAT_EV_READ) {
         AO_DBG_DEBUG("read");
         //receive payload
-        if (session.onReceiveChunk) {
-            auto ret = session.onReceiveChunk((const char *)c->MG_COMPAT_RECV.buf, c->MG_COMPAT_RECV.len);
+        if (session.method == FtpClient::Method::Retrieve) {
+
+            if (!session.fileWriter) {
+                AO_DBG_ERR("invalid state");
+                c->MG_COMPAT_RECV.len = 0;
+                mg_printf(session.ctrl_conn, "QUIT\r\n");
+                mg_close_conn(c);
+                return;
+            }
+
+            auto ret = session.fileWriter(c->MG_COMPAT_RECV.buf, c->MG_COMPAT_RECV.len);
 
             if (ret <= c->MG_COMPAT_RECV.len) {
                 c->MG_COMPAT_RECV.len -= ret;
@@ -377,10 +367,108 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 c->MG_COMPAT_RECV.len = 0;
                 mg_printf(session.ctrl_conn, "QUIT\r\n");
             }
-        } else {
-            AO_DBG_ERR("invalid state");
-            c->MG_COMPAT_RECV.len = 0;
-            mg_printf(session.ctrl_conn, "QUIT\r\n");
+        } //else: ignore incoming messages if Method is not Retrieve
+    } else if (ev == MG_EV_POLL) {
+        if (session.method == FtpClient::Method::Append && session.data_conn_accepted) {
+
+            if (!session.fileReader) {
+                AO_DBG_ERR("invalid state");
+                mg_printf(session.ctrl_conn, "QUIT\r\n");
+                mg_close_conn(c);
+                return;
+            }
+
+            if (c->MG_COMPAT_SEND.len == 0) { //fill send buff
+                if (c->MG_COMPAT_SEND.size < 512) {
+                    AO_DBG_DEBUG("resize send buff");
+                    mg_iobuf_resize(&c->MG_COMPAT_SEND, 512);
+                }
+                AO_DBG_DEBUG("write (max %zu bytes)", c->MG_COMPAT_SEND.size);
+
+                c->MG_COMPAT_SEND.len = session.fileReader(c->MG_COMPAT_SEND.buf, c->MG_COMPAT_SEND.size);
+
+                if (c->MG_COMPAT_SEND.len == 0) {
+                    AO_DBG_DEBUG("finished file reading");
+                    session.data_conn_accepted = false;
+                    mg_close_conn(c);
+                    return;
+                }
+
+                AO_DBG_DEBUG("wrote %zu bytes", c->MG_COMPAT_SEND.len);
+            }
         }
     }
+}
+
+bool FtpClient::readUrl(const char *ftp_url_raw) {
+    std::string ftp_url = ftp_url_raw; //copy input ftp_url
+
+    //tolower protocol specifier
+    for (auto c = ftp_url.begin(); *c != ':' && c != ftp_url.end(); c++) {
+        *c = tolower(*c);
+    }
+
+    //check if protocol supported
+    if (!strncmp(ftp_url.c_str(), "ftps", strlen("ftps"))) {
+        AO_DBG_ERR("no TLS support. Please use ftp://");
+        return false;
+    } else if (strncmp(ftp_url.c_str(), "ftp://", strlen("ftp://"))) {
+        AO_DBG_ERR("protocol not supported. Please use ftp://");
+        return false;
+    }
+
+    //parse FTP URL: dir and fname
+    auto dir_pos = ftp_url.find_first_of('/', strlen("ftp://"));
+    if (dir_pos != std::string::npos) {
+        auto fname_pos = ftp_url.find_last_of('/');
+        dir = ftp_url.substr(dir_pos, fname_pos - dir_pos);
+        fname = ftp_url.substr(fname_pos + 1);
+    }
+    
+    if (fname.empty()) {
+        AO_DBG_ERR("missing filename");
+        return false;
+    }
+    
+    AO_DBG_DEBUG("parsed dir: %s; fname: %s", dir.c_str(), fname.c_str());
+
+    //parse FTP URL: user, pass, host, port
+
+    std::string user_pass_host_port = ftp_url.substr(strlen("ftp://"), dir_pos - strlen("ftp://"));
+    std::string user_pass, host_port;
+    auto user_pass_delim = user_pass_host_port.find_first_of('@');
+    if (user_pass_delim != std::string::npos) {
+        host_port = user_pass_host_port.substr(user_pass_delim + 1);
+        user_pass = user_pass_host_port.substr(0, user_pass_delim);
+    } else {
+        host_port = user_pass_host_port;
+    }
+
+    if (!user_pass.empty()) {
+        auto user_delim = user_pass.find_first_of(':');
+        if (user_delim != std::string::npos) {
+            user = user_pass.substr(0, user_delim);
+            pass = user_pass.substr(user_delim + 1);
+        } else {
+            user = user_pass;
+        }
+    }
+
+    AO_DBG_DEBUG("parsed user: %s; pass: %s", user.c_str(), pass.c_str());
+
+    if (host_port.empty()) {
+        AO_DBG_ERR("missing hostname");
+        return false;
+    }
+
+    if (host_port.find(':') == std::string::npos) {
+        //use default port number
+        host_port.append(":21");
+    }
+
+    url = std::string("tcp://") + host_port;
+
+    AO_DBG_DEBUG("parsed ctrl_ch URL: %s", url.c_str());
+
+    return true;
 }
