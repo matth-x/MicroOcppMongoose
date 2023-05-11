@@ -2,8 +2,8 @@
 // Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
-#ifndef AO_FTPCLIENT_H
-#define AO_FTPCLIENT_H
+#ifndef AO_MONGOOSEFTPCLIENT_H
+#define AO_MONGOOSEFTPCLIENT_H
 
 #if defined(ARDUINO) //fix for conflicting defitions of IPAddress on Arduino
 #include <Arduino.h>
@@ -18,7 +18,7 @@
 
 namespace ArduinoOcpp {
 
-class FtpClient {
+class MongooseFtpClient {
 public:
     struct mg_mgr *mgr {nullptr};
     struct mg_connection *ctrl_conn {nullptr};
@@ -51,8 +51,8 @@ public:
 
     bool data_conn_accepted = false;
 
-    FtpClient(struct mg_mgr *mgr);
-    ~FtpClient();
+    MongooseFtpClient(struct mg_mgr *mgr);
+    ~MongooseFtpClient();
 
     bool getFile(const char *ftp_url, // ftp://[user[:pass]@]host[:port][/directory]/filename
             std::function<size_t(unsigned char *data, size_t len)> fileWriter,

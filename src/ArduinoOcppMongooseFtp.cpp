@@ -2,7 +2,7 @@
 // Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
-#include "FtpClient.h"
+#include "ArduinoOcppMongooseFtp.h"
 #include <ArduinoOcpp/Debug.h>
 #include <ArduinoOcpp/Platform.h>
 
@@ -31,11 +31,11 @@ void close_mg_conn(mg_connection *c) {
 #define MG_COMPAT_FN_DATA fn_data
 #endif
 
-FtpClient::FtpClient(struct mg_mgr *mgr) : mgr(mgr) {
+MongooseFtpClient::MongooseFtpClient(struct mg_mgr *mgr) : mgr(mgr) {
     AO_DBG_DEBUG("construct");
 }
 
-FtpClient::~FtpClient() {
+MongooseFtpClient::~MongooseFtpClient() {
     AO_DBG_DEBUG("destruct");
 
     if (data_conn) {
@@ -56,7 +56,7 @@ FtpClient::~FtpClient() {
     }
 }
 
-bool FtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned char *data, size_t len)> fileWriter, std::function<void()> onClose) {
+bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned char *data, size_t len)> fileWriter, std::function<void()> onClose) {
     if (!ftp_url_raw || !fileWriter) {
         AO_DBG_DEBUG("invalid args");
         return false;
@@ -88,7 +88,7 @@ bool FtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned c
     return true;
 }
 
-bool FtpClient::postFile(const char *ftp_url_raw, std::function<size_t(unsigned char *out, size_t buffsize)> fileReader, std::function<void()> onClose) {
+bool MongooseFtpClient::postFile(const char *ftp_url_raw, std::function<size_t(unsigned char *out, size_t buffsize)> fileReader, std::function<void()> onClose) {
     if (!ftp_url_raw || !fileReader) {
         AO_DBG_DEBUG("invalid args");
         return false;
@@ -151,7 +151,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         return;
     }
 
-    FtpClient& session = *reinterpret_cast<FtpClient*>(fn_data);
+    MongooseFtpClient& session = *reinterpret_cast<MongooseFtpClient*>(fn_data);
 
     if (ev == MG_EV_CONNECT) {
         AO_DBG_WARN("Insecure connection (FTP)");
@@ -325,15 +325,15 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         return;
     }
 
-    FtpClient& session = *reinterpret_cast<FtpClient*>(fn_data);
+    MongooseFtpClient& session = *reinterpret_cast<MongooseFtpClient*>(fn_data);
 
     if (ev == MG_EV_CONNECT) {
         AO_DBG_WARN("Insecure connection (FTP)");
         AO_DBG_INFO("connection %s -- connected!", session.data_url.c_str());
-        if (session.method == FtpClient::Method::Retrieve) {
+        if (session.method == MongooseFtpClient::Method::Retrieve) {
             AO_DBG_DEBUG("get file %s", session.fname.c_str());
             mg_printf(session.ctrl_conn, "RETR %s\r\n", session.fname.c_str());
-        } else if (session.method == FtpClient::Method::Append) {
+        } else if (session.method == MongooseFtpClient::Method::Append) {
             AO_DBG_DEBUG("post file %s", session.fname.c_str());
             mg_printf(session.ctrl_conn, "APPE %s\r\n", session.fname.c_str());
         } else {
@@ -348,7 +348,7 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
     } else if (ev == MG_COMPAT_EV_READ) {
         AO_DBG_DEBUG("read");
         //receive payload
-        if (session.method == FtpClient::Method::Retrieve) {
+        if (session.method == MongooseFtpClient::Method::Retrieve) {
 
             if (!session.fileWriter) {
                 AO_DBG_ERR("invalid state");
@@ -369,7 +369,7 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             }
         } //else: ignore incoming messages if Method is not Retrieve
     } else if (ev == MG_EV_POLL) {
-        if (session.method == FtpClient::Method::Append && session.data_conn_accepted) {
+        if (session.method == MongooseFtpClient::Method::Append && session.data_conn_accepted) {
 
             if (!session.fileReader) {
                 AO_DBG_ERR("invalid state");
@@ -400,7 +400,7 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
     }
 }
 
-bool FtpClient::readUrl(const char *ftp_url_raw) {
+bool MongooseFtpClient::readUrl(const char *ftp_url_raw) {
     std::string ftp_url = ftp_url_raw; //copy input ftp_url
 
     //tolower protocol specifier
