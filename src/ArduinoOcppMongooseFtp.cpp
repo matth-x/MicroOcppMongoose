@@ -16,6 +16,10 @@ void mg_compat_drain_conn(mg_connection *c) {
     c->flags |= MG_F_SEND_AND_CLOSE;
 }
 
+void mg_compat_iobuf_resize(struct mbuf *buf, size_t new_size) {
+    mbuf_resize(buf, new_size);
+};
+
 #define MG_COMPAT_EV_READ MG_EV_RECV
 #define MG_COMPAT_RECV recv_mbuf
 #define MG_COMPAT_SEND send_mbuf
@@ -24,6 +28,10 @@ void mg_compat_drain_conn(mg_connection *c) {
 void mg_compat_drain_conn(mg_connection *c) {
     c->is_draining = 1;
 }
+
+void mg_compat_iobuf_resize(struct mbuf *buf, size_t new_size) {
+    mg_iobuf_resize(buf, new_size);
+};
 
 #define MG_COMPAT_EV_READ MG_EV_READ
 #define MG_COMPAT_RECV recv
@@ -356,7 +364,7 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 return;
             }
 
-            auto ret = session.fileWriter(c->MG_COMPAT_RECV.buf, c->MG_COMPAT_RECV.len);
+            auto ret = session.fileWriter((unsigned char*)c->MG_COMPAT_RECV.buf, c->MG_COMPAT_RECV.len);
 
             if (ret <= c->MG_COMPAT_RECV.len) {
                 c->MG_COMPAT_RECV.len -= ret;
@@ -378,10 +386,10 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
             if (c->MG_COMPAT_SEND.len == 0) { //fill send buff
                 if (c->MG_COMPAT_SEND.size < 512) {
-                    mg_iobuf_resize(&c->MG_COMPAT_SEND, 512);
+                    mg_compat_iobuf_resize(&c->MG_COMPAT_SEND, 512);
                 }
 
-                c->MG_COMPAT_SEND.len = session.fileReader(c->MG_COMPAT_SEND.buf, c->MG_COMPAT_SEND.size);
+                c->MG_COMPAT_SEND.len = session.fileReader((unsigned char*)c->MG_COMPAT_SEND.buf, c->MG_COMPAT_SEND.size);
 
                 if (c->MG_COMPAT_SEND.len == 0) {
                     AO_DBG_DEBUG("finished file reading");
