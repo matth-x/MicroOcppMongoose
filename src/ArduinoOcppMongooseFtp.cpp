@@ -29,7 +29,7 @@ void mg_compat_drain_conn(mg_connection *c) {
     c->is_draining = 1;
 }
 
-void mg_compat_iobuf_resize(struct mbuf *buf, size_t new_size) {
+void mg_compat_iobuf_resize(struct mg_iobuf *buf, size_t new_size) {
     mg_iobuf_resize(buf, new_size);
 };
 
@@ -63,6 +63,9 @@ MongooseFtpClient::~MongooseFtpClient() {
 }
 
 bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned char *data, size_t len)> fileWriter, std::function<void()> onClose) {
+    
+    AO_DBG_WARN("FTP download experimental. Please test, evaluate and report the results on GitHub");
+    
     if (!ftp_url_raw || !fileWriter) {
         AO_DBG_ERR("invalid args");
         return false;
@@ -95,6 +98,9 @@ bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(un
 }
 
 bool MongooseFtpClient::postFile(const char *ftp_url_raw, std::function<size_t(unsigned char *out, size_t buffsize)> fileReader, std::function<void()> onClose) {
+    
+    AO_DBG_WARN("FTP upload experimental. Please test, evaluate and report the results on GitHub");
+    
     if (!ftp_url_raw || !fileReader) {
         AO_DBG_ERR("invalid args");
         return false;
