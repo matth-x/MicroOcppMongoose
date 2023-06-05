@@ -1,5 +1,5 @@
 // matth-x/ArduinoOcppMongoose
-// Copyright Matthias Akstaller 2019 - 2022
+// Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
 #include "ArduinoOcppMongooseClient.h"
@@ -429,7 +429,7 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
         case MG_EV_WEBSOCKET_FRAME: {
             struct websocket_message *wm = (struct websocket_message *) ev_data;
 
-            if (!osock->getReceiveTXTcallback()((const char *) wm->data, wm->size)) { //forward message to OcppEngine
+            if (!osock->getReceiveTXTcallback()((const char *) wm->data, wm->size)) { //forward message to Context
                 AO_DBG_ERR("processing WS input failed");
                 (void)0;
             }

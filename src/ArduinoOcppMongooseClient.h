@@ -11,7 +11,7 @@
 #endif
 
 #include "mongoose.h"
-#include <ArduinoOcpp/Core/OcppSocket.h>
+#include <ArduinoOcpp/Core/Connection.h>
 
 #include <string>
 #include <memory>
@@ -30,7 +30,7 @@ namespace ArduinoOcpp {
 class FilesystemAdapter;
 template<class T> class Configuration;
 
-class AOcppMongooseClient : public ArduinoOcpp::OcppSocket {
+class AOcppMongooseClient : public ArduinoOcpp::Connection {
 private:
     struct mg_mgr *mgr {nullptr};
     struct mg_connection *websocket {nullptr};
