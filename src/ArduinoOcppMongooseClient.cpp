@@ -7,7 +7,7 @@
 #include <ArduinoOcpp/Core/Configuration.h>
 #include <ArduinoOcpp/Debug.h>
 
-#define OCPP_CREDENTIALS_FN "/ocpp-creds.jsn"
+#define OCPP_CREDENTIALS_FN "ocpp-creds.jsn"
 
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
