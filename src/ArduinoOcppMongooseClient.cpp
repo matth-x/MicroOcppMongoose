@@ -41,7 +41,7 @@ AOcppMongooseClient::AOcppMongooseClient(struct mg_mgr *mgr,
         //make the credentials non-persistent
         AO_DBG_WARN("Credentials non-persistent. Use ArduinoOcpp::makeDefaultFilesystemAdapter(...) for persistency");
 
-        fn = CONFIGURATION_VOLATILE OCPP_CREDENTIALS_FN;
+        fn = CONFIGURATION_VOLATILE;
         write_permission = false;
     }
 
@@ -250,15 +250,13 @@ void AOcppMongooseClient::reload_credentials() {
         AO_DBG_DEBUG("empty URL closes connection");
         return;
     } else {
-        if (cb_id.empty()) {
-            url = backend_url;
-        } else {
-            if (backend_url.back() != '/') {
-                backend_url.append("/");
-            }
+        url = backend_url;
 
-            url = backend_url + cb_id;
+        if (url.back() != '/' && !cb_id.empty()) {
+            url.append("/");
         }
+
+        url.append(cb_id);
     }
 
     if (!auth_key.empty()) {
