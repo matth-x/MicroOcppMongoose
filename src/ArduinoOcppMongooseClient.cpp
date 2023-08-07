@@ -367,6 +367,7 @@ void AOcppMongooseClient::reconnect() {
 void AOcppMongooseClient::setConnectionOpen(bool open) {
     if (open) {
         connection_established = true;
+        last_connection_established = ao_tick_ms();
     } else {
         connection_closing = true;
     }
@@ -384,6 +385,10 @@ void AOcppMongooseClient::updateRcvTimer() {
 
 unsigned long AOcppMongooseClient::getLastRecv() {
     return last_recv;
+}
+
+unsigned long AOcppMongooseClient::getLastConnected() {
+    return last_connection_established;
 }
 
 #if defined(AO_MG_VERSION_614)
