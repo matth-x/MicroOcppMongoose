@@ -1,6 +1,8 @@
 # MicroOcppMongoose
 Mongoose WebSocket adapter for MicroOcpp
 
+**Formerly ArduinoOcppMongoose**: *see the statement on the former ArduinoOcpp [project site](https://github.com/matth-x/MicroOcpp)*
+
 ## Dependencies
 
 The following projects must be available on the include path:
