@@ -1,9 +1,9 @@
-// matth-x/ArduinoOcppMongoose
+// matth-x/MicroOcppMongoose
 // Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
-#ifndef AO_MONGOOSEFTPCLIENT_H
-#define AO_MONGOOSEFTPCLIENT_H
+#ifndef MOCPP_MONGOOSEFTPCLIENT_H
+#define MOCPP_MONGOOSEFTPCLIENT_H
 
 #if defined(ARDUINO) //fix for conflicting defitions of IPAddress on Arduino
 #include <Arduino.h>
@@ -16,7 +16,7 @@
 #include <memory>
 #include <functional>
 
-namespace ArduinoOcpp {
+namespace MicroOcpp {
 
 class MongooseFtpClient {
 public:
@@ -64,6 +64,6 @@ public:
             std::function<void()> onClose);
 };
 
-} //end namespace ArduinoOcpp
+} //end namespace MicroOcpp
 
 #endif

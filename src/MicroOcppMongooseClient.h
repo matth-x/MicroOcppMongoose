@@ -1,4 +1,4 @@
-// matth-x/ArduinoOcppMongoose
+// matth-x/MicroOcppMongoose
 // Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
@@ -11,7 +11,7 @@
 #endif
 
 #include "mongoose.h"
-#include <ArduinoOcpp/Core/Connection.h>
+#include <MicroOcpp/Core/Connection.h>
 
 #include <string>
 #include <memory>
@@ -21,16 +21,16 @@
  * a file on the flash filesystem, define the following build flag as 1 and
  * pass the filename to the constructor instead of a default plain-text certificate.
 */
-#ifndef AO_CA_CERT_LOCAL
-#define AO_CA_CERT_LOCAL 0
+#ifndef MOCPP_CA_CERT_LOCAL
+#define MOCPP_CA_CERT_LOCAL 0
 #endif
 
-namespace ArduinoOcpp {
+namespace MicroOcpp {
 
 class FilesystemAdapter;
 template<class T> class Configuration;
 
-class AOcppMongooseClient : public ArduinoOcpp::Connection {
+class MOcppMongooseClient : public MicroOcpp::Connection {
 private:
     struct mg_mgr *mgr {nullptr};
     struct mg_connection *websocket {nullptr};
@@ -43,7 +43,7 @@ private:
     std::shared_ptr<Configuration<const char*>> setting_backend_url;
     std::shared_ptr<Configuration<const char*>> setting_cb_id;
     std::shared_ptr<Configuration<const char*>> setting_auth_key;
-#if !AO_CA_CERT_LOCAL
+#if !MOCPP_CA_CERT_LOCAL
     std::shared_ptr<Configuration<const char*>> setting_ca_cert;
 #endif
     unsigned long last_status_dbg_msg {0}, last_recv {0};
@@ -63,24 +63,24 @@ private:
     void maintainWsConn();
 
 public:
-    AOcppMongooseClient(struct mg_mgr *mgr, 
+    MOcppMongooseClient(struct mg_mgr *mgr, 
             const char *backend_url_default = nullptr, 
             const char *charge_box_id_default = nullptr,
             const char *auth_key_default = nullptr,
             const char *CA_cert_default = nullptr, //forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
-            std::shared_ptr<ArduinoOcpp::FilesystemAdapter> filesystem = nullptr);
+            std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem = nullptr);
 
-    ~AOcppMongooseClient();
+    ~MOcppMongooseClient();
 
     void loop() override;
 
     bool sendTXT(std::string &out) override;
 
-    void setReceiveTXTcallback(ArduinoOcpp::ReceiveTXTcallback &receiveTXT) override {
+    void setReceiveTXTcallback(MicroOcpp::ReceiveTXTcallback &receiveTXT) override {
         this->receiveTXTcallback = receiveTXT;
     }
 
-    ArduinoOcpp::ReceiveTXTcallback &getReceiveTXTcallback() {
+    MicroOcpp::ReceiveTXTcallback &getReceiveTXTcallback() {
         return receiveTXTcallback;
     }
 

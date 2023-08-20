@@ -1,20 +1,20 @@
-# matth-x/ArduinoOcppMongoose
+# matth-x/MicroOcppMongoose
 # Copyright Matthias Akstaller 2019 - 2023
 # MIT License
 
 cmake_minimum_required(VERSION 3.15)
 
-set(AO_MG_SRC
-    src/ArduinoOcppMongooseClient_c.cpp
-    src/ArduinoOcppMongooseClient.cpp
-    src/ArduinoOcppMongooseFtp.cpp
+set(MOCPP_MG_SRC
+    src/MicroOcppMongooseClient_c.cpp
+    src/MicroOcppMongooseClient.cpp
+    src/MicroOcppMongooseFtp.cpp
 )
 
 if(ESP_PLATFORM)
 
-    idf_component_register(SRCS ${AO_MG_SRC}
+    idf_component_register(SRCS ${MOCPP_MG_SRC}
                         INCLUDE_DIRS "src"
-                        REQUIRES esp_timer mbedtls mongoose ArduinoOcpp)
+                        REQUIRES esp_timer mbedtls mongoose MicroOcpp)
 
     target_compile_definitions(${COMPONENT_LIB} PRIVATE 
         )
@@ -22,14 +22,14 @@ if(ESP_PLATFORM)
     return()
 endif()
 
-add_library(ArduinoOcppMongoose ${AO_MG_SRC})
+add_library(MicroOcppMongoose ${MOCPP_MG_SRC})
 
-target_include_directories(ArduinoOcppMongoose PUBLIC
+target_include_directories(MicroOcppMongoose PUBLIC
                             "./src"
                             "../mongoose"
                             )
 
-target_compile_definitions(ArduinoOcppMongoose PRIVATE
+target_compile_definitions(MicroOcppMongoose PRIVATE
     )
 
-target_link_libraries(ArduinoOcppMongoose PUBLIC ArduinoOcpp)
+target_link_libraries(MicroOcppMongoose PUBLIC MicroOcpp)

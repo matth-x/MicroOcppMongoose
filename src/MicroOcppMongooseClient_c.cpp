@@ -1,129 +1,129 @@
-// matth-x/ArduinoOcppMongoose
+// matth-x/MicroOcppMongoose
 // Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
-#include "ArduinoOcppMongooseClient_c.h"
-#include "ArduinoOcppMongooseClient.h"
+#include "MicroOcppMongooseClient_c.h"
+#include "MicroOcppMongooseClient.h"
 
-#include <ArduinoOcpp/Core/FilesystemAdapter.h>
-#include <ArduinoOcpp/Debug.h>
+#include <MicroOcpp/Core/FilesystemAdapter.h>
+#include <MicroOcpp/Debug.h>
 
-using namespace ArduinoOcpp;
+using namespace MicroOcpp;
 
-AO_Connection *ao_makeConnection(struct mg_mgr *mgr,
+OCPP_Connection *ocpp_makeConnection(struct mg_mgr *mgr,
         const char *backend_url_default,
         const char *charge_box_id_default,
         const char *auth_key_default,
         const char *CA_cert_default,
-        AO_FilesystemOpt fsopt) {
+        OCPP_FilesystemOpt fsopt) {
     
-    std::shared_ptr<ArduinoOcpp::FilesystemAdapter> filesystem;
+    std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem;
     
-#ifndef AO_DEACTIVATE_FLASH
+#ifndef MOCPP_DEACTIVATE_FLASH
     filesystem = makeDefaultFilesystemAdapter(fsopt);
 #endif
 
-    auto sock = new AOcppMongooseClient(mgr,
+    auto sock = new MOcppMongooseClient(mgr,
             backend_url_default,
             charge_box_id_default,
             auth_key_default,
             CA_cert_default,
             filesystem);
     
-    return reinterpret_cast<AO_Connection*>(sock);;
+    return reinterpret_cast<OCPP_Connection*>(sock);;
 }
 
-void ao_deinitConnection(AO_Connection *sock) {
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+void ocpp_deinitConnection(OCPP_Connection *sock) {
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     delete mgsock;
 }
 
-void ao_setBackendUrl(AO_Connection *sock, const char *backend_url) {
+void ocpp_setBackendUrl(OCPP_Connection *sock, const char *backend_url) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     mgsock->setBackendUrl(backend_url);
 }
 
-void ao_setChargeBoxId(AO_Connection *sock, const char *cb_id) {
+void ocpp_setChargeBoxId(OCPP_Connection *sock, const char *cb_id) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     mgsock->setChargeBoxId(cb_id);
 }
 
-void ao_setAuthKey(AO_Connection *sock, const char *auth_key) {
+void ocpp_setAuthKey(OCPP_Connection *sock, const char *auth_key) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     mgsock->setAuthKey(auth_key);
 }
 
-void ao_setCaCert(AO_Connection *sock, const char *ca_cert) {
+void ocpp_setCaCert(OCPP_Connection *sock, const char *ca_cert) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     mgsock->setCaCert(ca_cert);
 }
 
-void ao_reconnect(AO_Connection *sock) {
+void ocpp_reconnect(OCPP_Connection *sock) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     mgsock->reconnect();
 }
 
-const char *ao_getBackendUrl(AO_Connection *sock) {
+const char *ocpp_getBackendUrl(OCPP_Connection *sock) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return nullptr;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     return mgsock->getBackendUrl();
 }
 
-const char *ao_getChargeBoxId(AO_Connection *sock) {
+const char *ocpp_getChargeBoxId(OCPP_Connection *sock) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return nullptr;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     return mgsock->getChargeBoxId();
 }
 
-const char *ao_getAuthKey(AO_Connection *sock) {
+const char *ocpp_getAuthKey(OCPP_Connection *sock) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return nullptr;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     return mgsock->getAuthKey();
 }
 
-const char *ao_getCaCert(AO_Connection *sock) {
+const char *ocpp_getCaCert(OCPP_Connection *sock) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return nullptr;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     return mgsock->getCaCert();
 }
 
-bool ao_isConnectionOpen(AO_Connection *sock) {
+bool ocpp_isConnectionOpen(OCPP_Connection *sock) {
     if (!sock) {
-        AO_DBG_ERR("invalid argument");
+        MOCPP_DBG_ERR("invalid argument");
         return false;
     }
-    auto mgsock = reinterpret_cast<AOcppMongooseClient*>(sock);
+    auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
     return mgsock->isConnectionOpen();
 }
