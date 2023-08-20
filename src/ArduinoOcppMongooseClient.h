@@ -53,6 +53,7 @@ private:
     std::shared_ptr<Configuration<int>> ws_ping_interval; //heartbeat intervall in s. 0 sets hb off
     unsigned long last_hb {0};
     bool connection_established {false};
+    unsigned long last_connection_established {-1UL / 2UL};
     bool connection_closing {false};
     ReceiveTXTcallback receiveTXTcallback = [] (const char *, size_t) {return false;};
 
@@ -103,6 +104,7 @@ public:
 
     void updateRcvTimer();
     unsigned long getLastRecv(); //get time of last successful receive in millis
+    unsigned long getLastConnected(); //get time of last connection establish
 };
 
 }
