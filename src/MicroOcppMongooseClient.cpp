@@ -46,26 +46,26 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
     }
 
     setting_backend_url = declareConfiguration<const char*>(
-        "MO_BackendUrl", backend_url_default ? backend_url_default : "",
+        MOCPP_CONFIG_EXT_PREFIX "BackendUrl", backend_url_default ? backend_url_default : "",
         fn, write_permission, true, true, true);
     setting_cb_id = declareConfiguration<const char*>(
-        "MO_ChargeBoxId", charge_box_id_default ? charge_box_id_default : "",
+        MOCPP_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_default ? charge_box_id_default : "",
         fn, write_permission, true, true, true);
     setting_auth_key = declareConfiguration<const char*>(
         "AuthorizationKey", auth_key_default ? auth_key_default : "",
         fn, write_permission, true, true, true);
 #if !MOCPP_CA_CERT_LOCAL
     setting_ca_cert = declareConfiguration<const char*>(
-        "MO_CaCert", CA_cert_default ? CA_cert_default : "",
+        MOCPP_CONFIG_EXT_PREFIX "CaCert", CA_cert_default ? CA_cert_default : "",
         fn, write_permission, true, true, true);
 #endif
 
     ws_ping_interval = declareConfiguration<int>(
         "WebSocketPingInterval", 5, fn, true, true, true);
     reconnect_interval = declareConfiguration<int>(
-        "MO_ReconnectInterval", 10, fn, true, true, true);
+        MOCPP_CONFIG_EXT_PREFIX "ReconnectInterval", 10, fn, true, true, true);
     stale_timeout = declareConfiguration<int>(
-        "MO_StaleTimeout", 300, fn, true, true, true);
+        MOCPP_CONFIG_EXT_PREFIX "StaleTimeout", 300, fn, true, true, true);
 
     configuration_save();
 
