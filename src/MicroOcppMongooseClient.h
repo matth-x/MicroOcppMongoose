@@ -74,7 +74,7 @@ public:
 
     void loop() override;
 
-    bool sendTXT(std::string &out) override;
+    bool sendTXT(const char *msg, size_t length) override;
 
     void setReceiveTXTcallback(MicroOcpp::ReceiveTXTcallback &receiveTXT) override {
         this->receiveTXTcallback = receiveTXT;

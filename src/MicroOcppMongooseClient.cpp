@@ -109,7 +109,7 @@ void MOcppMongooseClient::loop() {
     maintainWsConn();
 }
 
-bool MOcppMongooseClient::sendTXT(std::string &out) {
+bool MOcppMongooseClient::sendTXT(const char *msg, size_t length) {
     if (!websocket || !isConnectionOpen()) {
         return false;
     }
@@ -119,14 +119,14 @@ bool MOcppMongooseClient::sendTXT(std::string &out) {
         sent = 0;
         return false;
     } else {
-        mg_send_websocket_frame(websocket, WEBSOCKET_OP_TEXT, out.c_str(), out.length());
-        sent = out.length();
+        mg_send_websocket_frame(websocket, WEBSOCKET_OP_TEXT, msg, length);
+        sent = length;
     }
 #else
-    sent = mg_ws_send(websocket, out.c_str(), out.length(), WEBSOCKET_OP_TEXT);
+    sent = mg_ws_send(websocket, msg, length, WEBSOCKET_OP_TEXT);
 #endif
-    if (sent < out.length()) {
-        MOCPP_DBG_WARN("mg_ws_send did only accept %zu out of %zu bytes", sent, out.length());
+    if (sent < length) {
+        MOCPP_DBG_WARN("mg_ws_send did only accept %zu out of %zu bytes", sent, length);
         //flush broken package and wait for next retry
         (void)0;
     }
