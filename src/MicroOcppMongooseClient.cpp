@@ -7,8 +7,6 @@
 #include <MicroOcpp/Core/Configuration.h>
 #include <MicroOcpp/Debug.h>
 
-#define OCPP_CREDENTIALS_FN "ws-conn.jsn"
-
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
 
@@ -21,66 +19,53 @@ using namespace MicroOcpp;
 void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 
 MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
-            const char *backend_url_default, 
-            const char *charge_box_id_default,
-            const char *auth_key_default,
-            const char *CA_cert_default,
+            const char *backend_url_factory, 
+            const char *charge_box_id_factory,
+            const char *auth_key_factory,
+            const char *CA_cert_factory,
             std::shared_ptr<FilesystemAdapter> filesystem) : mgr(mgr) {
     
-    const char *fn;
-    bool write_permission;
+    bool readonly;
     
     if (filesystem) {
         configuration_init(filesystem);
 
         //all credentials are persistent over reboots
-
-        fn = MOCPP_FILENAME_PREFIX OCPP_CREDENTIALS_FN;
-        write_permission = true;
+        readonly = false;
     } else {
         //make the credentials non-persistent
         MOCPP_DBG_WARN("Credentials non-persistent. Use MicroOcpp::makeDefaultFilesystemAdapter(...) for persistency");
-
-        fn = CONFIGURATION_VOLATILE;
-        write_permission = false;
+        readonly = true;
     }
 
-    setting_backend_url = declareConfiguration<const char*>(
-        MOCPP_CONFIG_EXT_PREFIX "BackendUrl", backend_url_default ? backend_url_default : "",
-        fn, write_permission, true, true, true);
-    setting_cb_id = declareConfiguration<const char*>(
-        MOCPP_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_default ? charge_box_id_default : "",
-        fn, write_permission, true, true, true);
-    setting_auth_key = declareConfiguration<const char*>(
-        "AuthorizationKey", auth_key_default ? auth_key_default : "",
-        fn, write_permission, true, true, true);
+    setting_backend_url_str = declareConfiguration<const char*>(
+        MOCPP_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MOCPP_WSCONN_FN, readonly, true);
+    setting_cb_id_str = declareConfiguration<const char*>(
+        MOCPP_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MOCPP_WSCONN_FN, readonly, true);
+    setting_auth_key_str = declareConfiguration<const char*>(
+        "AuthorizationKey", auth_key_factory, MOCPP_WSCONN_FN, readonly, true);
 #if !MOCPP_CA_CERT_LOCAL
-    setting_ca_cert = declareConfiguration<const char*>(
-        MOCPP_CONFIG_EXT_PREFIX "CaCert", CA_cert_default ? CA_cert_default : "",
-        fn, write_permission, true, true, true);
+    setting_ca_cert_str = declareConfiguration<const char*>(
+        MOCPP_CONFIG_EXT_PREFIX "CaCert", CA_cert_factory, MOCPP_WSCONN_FN, readonly, true);
 #endif
 
-    ws_ping_interval = declareConfiguration<int>(
-        "WebSocketPingInterval", 5, fn, true, true, true);
-    reconnect_interval = declareConfiguration<int>(
-        MOCPP_CONFIG_EXT_PREFIX "ReconnectInterval", 10, fn, true, true, true);
-    stale_timeout = declareConfiguration<int>(
-        MOCPP_CONFIG_EXT_PREFIX "StaleTimeout", 300, fn, true, true, true);
+    ws_ping_interval_int = declareConfiguration<int>(
+        "WebSocketPingInterval", 5, MOCPP_WSCONN_FN);
+    reconnect_interval_int = declareConfiguration<int>(
+        MOCPP_CONFIG_EXT_PREFIX "ReconnectInterval", 10, MOCPP_WSCONN_FN);
+    stale_timeout_int = declareConfiguration<int>(
+        MOCPP_CONFIG_EXT_PREFIX "StaleTimeout", 300, MOCPP_WSCONN_FN);
 
-    configuration_save();
+    configuration_load(MOCPP_WSCONN_FN);
 
-    backend_url = setting_backend_url && *setting_backend_url ? *setting_backend_url : 
-        (backend_url_default ? backend_url_default : "");
-    cb_id = setting_cb_id && *setting_cb_id ? *setting_cb_id : 
-        (charge_box_id_default ? charge_box_id_default : "");
-    auth_key = setting_auth_key && *setting_auth_key ? *setting_auth_key : 
-        (auth_key_default ? auth_key_default : "");
+    backend_url = setting_backend_url_str ? setting_backend_url_str->getString() : "";
+    cb_id = setting_cb_id_str ? setting_cb_id_str->getString() : "";
+    auth_key = setting_auth_key_str ?  setting_auth_key_str->getString() : "";
     
 #if !MOCPP_CA_CERT_LOCAL
-    ca_cert = setting_ca_cert && *setting_ca_cert ? *setting_ca_cert : 
-        (CA_cert_default ? CA_cert_default : "");
+    ca_cert = setting_ca_cert_str ? setting_ca_cert_str->getString()  : "";
 #else
-    ca_cert = CA_cert_default ? CA_cert_default : "";
+    ca_cert = CA_cert_factory ? CA_cert_factory : "";
 #endif
 
 #if defined(MOCPP_MG_VERSION_614)
@@ -141,21 +126,21 @@ void MOcppMongooseClient::maintainWsConn() {
         //WS successfully connected?
         if (!isConnectionOpen()) {
             MOCPP_DBG_DEBUG("WS unconnected");
-        } else if (mocpp_tick_ms() - last_recv >= (ws_ping_interval && *ws_ping_interval > 0 ? (*ws_ping_interval * 1000UL) : 0UL) + WS_UNRESPONSIVE_THRESHOLD_MS) {
+        } else if (mocpp_tick_ms() - last_recv >= (ws_ping_interval_int && ws_ping_interval_int->getInt() > 0 ? (ws_ping_interval_int->getInt() * 1000UL) : 0UL) + WS_UNRESPONSIVE_THRESHOLD_MS) {
             //WS connected but unresponsive
             MOCPP_DBG_DEBUG("WS unresponsive");
         }
     }
 
     if (websocket && isConnectionOpen() &&
-            stale_timeout && *stale_timeout > 0 && mocpp_tick_ms() - last_recv >= (*stale_timeout * 1000UL)) {
+            stale_timeout_int && stale_timeout_int->getInt() > 0 && mocpp_tick_ms() - last_recv >= (stale_timeout_int->getInt() * 1000UL)) {
         MOCPP_DBG_INFO("connection %s -- stale, reconnect", url.c_str());
         reconnect();
         return;
     }
 
     if (websocket && isConnectionOpen() &&
-            ws_ping_interval && *ws_ping_interval > 0 && mocpp_tick_ms() - last_hb >= (*ws_ping_interval * 1000UL)) {
+            ws_ping_interval_int && ws_ping_interval_int->getInt() > 0 && mocpp_tick_ms() - last_hb >= (ws_ping_interval_int->getInt() * 1000UL)) {
         last_hb = mocpp_tick_ms();
 #if defined(MOCPP_MG_VERSION_614)
         mg_send_websocket_frame(websocket, WEBSOCKET_OP_PING, "", 0);
@@ -178,7 +163,7 @@ void MOcppMongooseClient::maintainWsConn() {
         return;
     }
 
-    if (reconnect_interval && *reconnect_interval > 0 && mocpp_tick_ms() - last_reconnection_attempt < (*reconnect_interval * 1000UL)) {
+    if (reconnect_interval_int && reconnect_interval_int->getInt() > 0 && mocpp_tick_ms() - last_reconnection_attempt < (reconnect_interval_int->getInt() * 1000UL)) {
         return;
     }
 
@@ -286,8 +271,8 @@ void MOcppMongooseClient::setBackendUrl(const char *backend_url_cstr) {
     }
     backend_url = backend_url_cstr;
 
-    if (setting_backend_url) {
-        *setting_backend_url = backend_url_cstr;
+    if (setting_backend_url_str) {
+        setting_backend_url_str->setString(backend_url_cstr);
         configuration_save();
     }
 
@@ -303,8 +288,8 @@ void MOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
     }
     cb_id = cb_id_cstr;
 
-    if (setting_cb_id) {
-        *setting_cb_id = cb_id_cstr;
+    if (setting_cb_id_str) {
+        setting_cb_id_str->setString(cb_id_cstr);
         configuration_save();
     }
 
@@ -320,8 +305,8 @@ void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
     }
     auth_key = auth_key_cstr;
 
-    if (setting_auth_key) {
-        *setting_auth_key = auth_key_cstr;
+    if (setting_auth_key_str) {
+        setting_auth_key_str->setString(auth_key_cstr);
         configuration_save();
     }
 
@@ -338,8 +323,8 @@ void MOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
     ca_cert = ca_cert_cstr;
 
 #if !MOCPP_CA_CERT_LOCAL
-    if (setting_ca_cert) {
-        *setting_ca_cert = ca_cert_cstr;
+    if (setting_ca_cert_str) {
+        setting_ca_cert_str->setString(ca_cert_cstr);
         configuration_save();
     }
 #endif
