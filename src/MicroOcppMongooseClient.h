@@ -61,8 +61,7 @@ private:
     bool connection_closing {false};
     ReceiveTXTcallback receiveTXTcallback = [] (const char *, size_t) {return false;};
 
-    bool credentials_changed {true}; //set credentials to be reloaded
-    void reload_credentials();
+    void reconnect();
 
     void maintainWsConn();
 
@@ -88,12 +87,13 @@ public:
         return receiveTXTcallback;
     }
 
+    //update WS configs. To apply the updates, call `reloadConfigs()` afterwards
     void setBackendUrl(const char *backend_url);
     void setChargeBoxId(const char *cb_id);
     void setAuthKey(const char *auth_key);
     void setCaCert(const char *ca_cert); //forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
 
-    void reconnect(); //after updating all credentials, reconnect to apply them
+    void reloadConfigs();
 
     const char *getBackendUrl() {return backend_url.c_str();}
     const char *getChargeBoxId() {return cb_id.c_str();}
