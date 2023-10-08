@@ -29,12 +29,13 @@ OCPP_Connection *ocpp_makeConnection(struct mg_mgr *mgr,
 
 void ocpp_deinitConnection(OCPP_Connection *sock);
 
+//update WS configs. To apply the updates, call `ocpp_reloadConfigs()` afterwards
 void ocpp_setBackendUrl(OCPP_Connection *sock, const char *backend_url);
 void ocpp_setChargeBoxId(OCPP_Connection *sock, const char *cb_id);
 void ocpp_setAuthKey(OCPP_Connection *sock, const char *auth_key);
 void ocpp_setCaCert(OCPP_Connection *sock, const char *ca_cert);
 
-void ocpp_reconnect(OCPP_Connection *sock); //after updating all credentials, reconnect to apply them
+void ocpp_reloadConfigs(OCPP_Connection *sock);
 
 const char *ocpp_getBackendUrl(OCPP_Connection *sock);
 const char *ocpp_getChargeBoxId(OCPP_Connection *sock);

@@ -74,13 +74,13 @@ void ocpp_setCaCert(OCPP_Connection *sock, const char *ca_cert) {
     mgsock->setCaCert(ca_cert);
 }
 
-void ocpp_reconnect(OCPP_Connection *sock) {
+void ocpp_reloadConfigs(OCPP_Connection *sock) {
     if (!sock) {
         MOCPP_DBG_ERR("invalid argument");
         return;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
-    mgsock->reconnect();
+    mgsock->reloadConfigs();
 }
 
 const char *ocpp_getBackendUrl(OCPP_Connection *sock) {

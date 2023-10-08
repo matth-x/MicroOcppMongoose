@@ -47,6 +47,8 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
 #if !MOCPP_CA_CERT_LOCAL
     setting_ca_cert_str = declareConfiguration<const char*>(
         MOCPP_CONFIG_EXT_PREFIX "CaCert", CA_cert_factory, MOCPP_WSCONN_FN, readonly, true);
+#else
+    ca_cert = CA_cert_factory ? CA_cert_factory : "";
 #endif
 
     ws_ping_interval_int = declareConfiguration<int>(
@@ -56,17 +58,9 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
     stale_timeout_int = declareConfiguration<int>(
         MOCPP_CONFIG_EXT_PREFIX "StaleTimeout", 300, MOCPP_WSCONN_FN);
 
-    configuration_load(MOCPP_WSCONN_FN);
+    configuration_load(MOCPP_WSCONN_FN); //load configs with values stored on flash
 
-    backend_url = setting_backend_url_str ? setting_backend_url_str->getString() : "";
-    cb_id = setting_cb_id_str ? setting_cb_id_str->getString() : "";
-    auth_key = setting_auth_key_str ?  setting_auth_key_str->getString() : "";
-    
-#if !MOCPP_CA_CERT_LOCAL
-    ca_cert = setting_ca_cert_str ? setting_ca_cert_str->getString()  : "";
-#else
-    ca_cert = CA_cert_factory ? CA_cert_factory : "";
-#endif
+    reloadConfigs(); //load WS creds with configs values
 
 #if defined(MOCPP_MG_VERSION_614)
     MOCPP_DBG_DEBUG("use MG version %s (tested with 6.14)", MG_VERSION);
@@ -153,11 +147,6 @@ void MOcppMongooseClient::maintainWsConn() {
         return;
     }
 
-    if (credentials_changed) {
-        reload_credentials();
-        credentials_changed = false;
-    }
-
     if (url.empty()) {
         //cannot open OCPP connection: credentials missing
         return;
@@ -227,7 +216,102 @@ void MOcppMongooseClient::maintainWsConn() {
 
 }
 
-void MOcppMongooseClient::reload_credentials() {
+void MOcppMongooseClient::reconnect() {
+    if (!websocket) {
+        return;
+    }
+#if defined(MOCPP_MG_VERSION_614)
+    if (!connection_closing) {
+        const char *msg = "socket closed by client";
+        mg_send_websocket_frame(websocket, WEBSOCKET_OP_CLOSE, msg, strlen(msg));
+    }
+#else
+    websocket->is_closing = 1; //Mongoose will close the socket and the following maintainWsConn() call will open it again
+#endif
+    setConnectionOpen(false);
+}
+
+void MOcppMongooseClient::setBackendUrl(const char *backend_url_cstr) {
+    if (!backend_url_cstr) {
+        MOCPP_DBG_ERR("invalid argument");
+        return;
+    }
+
+    if (setting_backend_url_str) {
+        setting_backend_url_str->setString(backend_url_cstr);
+        configuration_save();
+    }
+}
+
+void MOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
+    if (!cb_id_cstr) {
+        MOCPP_DBG_ERR("invalid argument");
+        return;
+    }
+
+    if (setting_cb_id_str) {
+        setting_cb_id_str->setString(cb_id_cstr);
+        configuration_save();
+    }
+}
+
+void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
+    if (!auth_key_cstr) {
+        MOCPP_DBG_ERR("invalid argument");
+        return;
+    }
+
+    if (setting_auth_key_str) {
+        setting_auth_key_str->setString(auth_key_cstr);
+        configuration_save();
+    }
+}
+
+void MOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
+    if (!ca_cert_cstr) {
+        MOCPP_DBG_ERR("invalid argument");
+        return;
+    }
+
+#if !MOCPP_CA_CERT_LOCAL
+    if (setting_ca_cert_str) {
+        setting_ca_cert_str->setString(ca_cert_cstr);
+        configuration_save();
+    }
+#else
+    ca_cert = ca_cert_cstr; //updated ca_cert takes immediate effect
+#endif
+}
+
+void MOcppMongooseClient::reloadConfigs() {
+
+    reconnect(); //closes WS connection; will be reopened in next maintainWsConn execution
+
+    /*
+     * reload WS credentials from configs
+     */
+    if (setting_backend_url_str) {
+        backend_url = setting_backend_url_str->getString();
+    }
+
+    if (setting_cb_id_str) {
+        cb_id = setting_cb_id_str->getString();
+    }
+
+    if (setting_auth_key_str) {
+        auth_key = setting_auth_key_str->getString();
+    }
+
+#if !MOCPP_CA_CERT_LOCAL
+    if (setting_ca_cert_str) {
+        ca_cert = setting_ca_cert_str->getString();
+    }
+#endif
+
+    /*
+     * determine new URL and auth token with updated WS credentials
+     */
+
     url.clear();
     basic_auth64.clear();
 
@@ -262,91 +346,6 @@ void MOcppMongooseClient::reload_credentials() {
         MOCPP_DBG_DEBUG("no authentication");
         (void) 0;
     }
-}
-
-void MOcppMongooseClient::setBackendUrl(const char *backend_url_cstr) {
-    if (!backend_url_cstr) {
-        MOCPP_DBG_ERR("invalid argument");
-        return;
-    }
-    backend_url = backend_url_cstr;
-
-    if (setting_backend_url_str) {
-        setting_backend_url_str->setString(backend_url_cstr);
-        configuration_save();
-    }
-
-    credentials_changed = true; //reload composed credentials when reconnecting the next time
-
-    reconnect();
-}
-
-void MOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
-    if (!cb_id_cstr) {
-        MOCPP_DBG_ERR("invalid argument");
-        return;
-    }
-    cb_id = cb_id_cstr;
-
-    if (setting_cb_id_str) {
-        setting_cb_id_str->setString(cb_id_cstr);
-        configuration_save();
-    }
-
-    credentials_changed = true; //reload composed credentials when reconnecting the next time
-
-    reconnect();
-}
-
-void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
-    if (!auth_key_cstr) {
-        MOCPP_DBG_ERR("invalid argument");
-        return;
-    }
-    auth_key = auth_key_cstr;
-
-    if (setting_auth_key_str) {
-        setting_auth_key_str->setString(auth_key_cstr);
-        configuration_save();
-    }
-
-    credentials_changed = true; //reload composed credentials when reconnecting the next time
-
-    reconnect();
-}
-
-void MOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
-    if (!ca_cert_cstr) {
-        MOCPP_DBG_ERR("invalid argument");
-        return;
-    }
-    ca_cert = ca_cert_cstr;
-
-#if !MOCPP_CA_CERT_LOCAL
-    if (setting_ca_cert_str) {
-        setting_ca_cert_str->setString(ca_cert_cstr);
-        configuration_save();
-    }
-#endif
-
-    credentials_changed = true; //reload composed credentials when reconnecting the next time
-
-    reconnect();
-}
-
-void MOcppMongooseClient::reconnect() {
-    if (!websocket) {
-        return;
-    }
-#if defined(MOCPP_MG_VERSION_614)
-    if (!connection_closing) {
-        const char *msg = "socket closed by client";
-        mg_send_websocket_frame(websocket, WEBSOCKET_OP_CLOSE, msg, strlen(msg));
-    }
-#else
-    websocket->is_closing = 1; //Mongoose will close the socket and the following maintainWsConn() call will open it again
-#endif
-    setConnectionOpen(false);
 }
 
 void MOcppMongooseClient::setConnectionOpen(bool open) {
