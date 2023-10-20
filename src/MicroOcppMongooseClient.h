@@ -16,8 +16,8 @@
 #include <string>
 #include <memory>
 
-#ifndef MOCPP_WSCONN_FN
-#define MOCPP_WSCONN_FN (MOCPP_FILENAME_PREFIX "ws-conn.jsn")
+#ifndef MO_WSCONN_FN
+#define MO_WSCONN_FN (MO_FILENAME_PREFIX "ws-conn.jsn")
 #endif
 
 /*
@@ -25,8 +25,8 @@
  * a file on the flash filesystem, define the following build flag as 1 and
  * pass the filename to the constructor instead of a default plain-text certificate.
 */
-#ifndef MOCPP_CA_CERT_LOCAL
-#define MOCPP_CA_CERT_LOCAL 0
+#ifndef MO_CA_CERT_LOCAL
+#define MO_CA_CERT_LOCAL 0
 #endif
 
 namespace MicroOcpp {
@@ -47,7 +47,7 @@ private:
     std::shared_ptr<Configuration> setting_backend_url_str;
     std::shared_ptr<Configuration> setting_cb_id_str;
     std::shared_ptr<Configuration> setting_auth_key_str;
-#if !MOCPP_CA_CERT_LOCAL
+#if !MO_CA_CERT_LOCAL
     std::shared_ptr<Configuration> setting_ca_cert_str;
 #endif
     unsigned long last_status_dbg_msg {0}, last_recv {0};

@@ -19,7 +19,7 @@ OCPP_Connection *ocpp_makeConnection(struct mg_mgr *mgr,
     
     std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem;
     
-#ifndef MOCPP_DEACTIVATE_FLASH
+#ifndef MO_DEACTIVATE_FLASH
     filesystem = makeDefaultFilesystemAdapter(fsopt);
 #endif
 
@@ -40,7 +40,7 @@ void ocpp_deinitConnection(OCPP_Connection *sock) {
 
 void ocpp_setBackendUrl(OCPP_Connection *sock, const char *backend_url) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -49,7 +49,7 @@ void ocpp_setBackendUrl(OCPP_Connection *sock, const char *backend_url) {
 
 void ocpp_setChargeBoxId(OCPP_Connection *sock, const char *cb_id) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -58,7 +58,7 @@ void ocpp_setChargeBoxId(OCPP_Connection *sock, const char *cb_id) {
 
 void ocpp_setAuthKey(OCPP_Connection *sock, const char *auth_key) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -67,7 +67,7 @@ void ocpp_setAuthKey(OCPP_Connection *sock, const char *auth_key) {
 
 void ocpp_setCaCert(OCPP_Connection *sock, const char *ca_cert) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -76,7 +76,7 @@ void ocpp_setCaCert(OCPP_Connection *sock, const char *ca_cert) {
 
 void ocpp_reloadConfigs(OCPP_Connection *sock) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -85,7 +85,7 @@ void ocpp_reloadConfigs(OCPP_Connection *sock) {
 
 const char *ocpp_getBackendUrl(OCPP_Connection *sock) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return nullptr;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -94,7 +94,7 @@ const char *ocpp_getBackendUrl(OCPP_Connection *sock) {
 
 const char *ocpp_getChargeBoxId(OCPP_Connection *sock) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return nullptr;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -103,7 +103,7 @@ const char *ocpp_getChargeBoxId(OCPP_Connection *sock) {
 
 const char *ocpp_getAuthKey(OCPP_Connection *sock) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return nullptr;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -112,7 +112,7 @@ const char *ocpp_getAuthKey(OCPP_Connection *sock) {
 
 const char *ocpp_getCaCert(OCPP_Connection *sock) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return nullptr;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);
@@ -121,7 +121,7 @@ const char *ocpp_getCaCert(OCPP_Connection *sock) {
 
 bool ocpp_isConnectionOpen(OCPP_Connection *sock) {
     if (!sock) {
-        MOCPP_DBG_ERR("invalid argument");
+        MO_DBG_ERR("invalid argument");
         return false;
     }
     auto mgsock = reinterpret_cast<MOcppMongooseClient*>(sock);

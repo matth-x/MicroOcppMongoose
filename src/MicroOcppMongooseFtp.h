@@ -2,8 +2,8 @@
 // Copyright Matthias Akstaller 2019 - 2023
 // GPL-3.0 License (see LICENSE)
 
-#ifndef MOCPP_MONGOOSEFTPCLIENT_H
-#define MOCPP_MONGOOSEFTPCLIENT_H
+#ifndef MO_MONGOOSEFTPCLIENT_H
+#define MO_MONGOOSEFTPCLIENT_H
 
 #if defined(ARDUINO) //fix for conflicting defitions of IPAddress on Arduino
 #include <Arduino.h>

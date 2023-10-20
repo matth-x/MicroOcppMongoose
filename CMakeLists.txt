@@ -4,7 +4,7 @@
 
 cmake_minimum_required(VERSION 3.15)
 
-set(MOCPP_MG_SRC
+set(MO_MG_SRC
     src/MicroOcppMongooseClient_c.cpp
     src/MicroOcppMongooseClient.cpp
     src/MicroOcppMongooseFtp.cpp
@@ -12,7 +12,7 @@ set(MOCPP_MG_SRC
 
 if(ESP_PLATFORM)
 
-    idf_component_register(SRCS ${MOCPP_MG_SRC}
+    idf_component_register(SRCS ${MO_MG_SRC}
                         INCLUDE_DIRS "src"
                         REQUIRES esp_timer mbedtls mongoose MicroOcpp)
 
@@ -22,7 +22,7 @@ if(ESP_PLATFORM)
     return()
 endif()
 
-add_library(MicroOcppMongoose ${MOCPP_MG_SRC})
+add_library(MicroOcppMongoose ${MO_MG_SRC})
 
 target_include_directories(MicroOcppMongoose PUBLIC
                             "./src"
