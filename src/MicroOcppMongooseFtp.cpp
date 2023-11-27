@@ -456,7 +456,10 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             struct mg_tls_opts opts;
             memset(&opts, 0, sizeof(opts));
             //opts.ca = CERT; //TODO
+            int save_is_connecting = c->is_connecting;
+            c->is_connecting = 1; //do not perform tls_handshake during mg_tls_init
             mg_tls_init(c, &opts);
+            c->is_connecting = save_is_connecting;
             #endif
 
             //reuse session of control conn for data conn
