@@ -11,6 +11,10 @@ using namespace MicroOcpp;
 void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 
+#define MG_COMPAT_NOSSL   0
+#define MG_COMPAT_OPENSSL 1
+#define MG_COMPAT_MBEDTLS 2
+
 #if defined(MO_MG_VERSION_614)
 void mg_compat_drain_conn(mg_connection *c) {
     c->flags |= MG_F_SEND_AND_CLOSE;
@@ -20,11 +24,42 @@ void mg_compat_iobuf_resize(struct mbuf *buf, size_t new_size) {
     mbuf_resize(buf, new_size);
 };
 
+//TLS lib internals not exposed in MG v6.14 interface. Cast them to copies of their definition (see mongoose.c)
+#if MG_SSL_IF == MG_SSL_IF_OPENSSL
+#define MG_COMPAT_TLS MG_COMPAT_OPENSSL
+#include <openssl/ssl.h>
+extern "C" struct MG_TLS_INTERNAL {
+  SSL *ssl;
+  SSL_CTX *ssl_ctx;
+  struct mbuf psk;
+  size_t identity_len;
+};
+SSL *mg_compat_get_tls(struct mg_connection *c) {
+    return (SSL*) ((struct MG_TLS_INTERNAL*)c->ssl_if_data)->ssl;
+}
+#elif MG_SSL_IF == MG_SSL_IF_MBEDTLS
+#define MG_COMPAT_TLS MG_COMPAT_MBEDTLS
+#include <mbedtls/ssl.h>
+extern "C" struct MG_TLS_INTERNAL {
+  mbedtls_ssl_config *conf;
+  mbedtls_ssl_context *ssl;
+  mbedtls_x509_crt *cert;
+  mbedtls_pk_context *key;
+  mbedtls_x509_crt *ca_cert;
+  struct mbuf cipher_suites;
+  size_t saved_len;
+};
+mbedtls_ssl_context *mg_compat_get_tls(struct mg_connection *c) {
+    return (mbedtls_ssl_context*) ((struct MG_TLS_INTERNAL*)c->ssl_if_data)->ssl;
+}
+#endif
+
 #define MG_COMPAT_EV_READ MG_EV_RECV
 #define MG_COMPAT_RECV recv_mbuf
 #define MG_COMPAT_SEND send_mbuf
 #define MG_COMPAT_FN_DATA user_data
 #define MG_COMPAT_IS_TLS(c) ((c->flags & MG_F_SSL) == MG_F_SSL)
+#define MG_COMPAT_EV_TLS_HS 100500 //event number not used by MG
 #else
 void mg_compat_drain_conn(mg_connection *c) {
     c->is_draining = 1;
@@ -34,12 +69,28 @@ void mg_compat_iobuf_resize(struct mg_iobuf *buf, size_t new_size) {
     mg_iobuf_resize(buf, new_size);
 };
 
+#if MG_ENABLE_OPENSSL
+#define MG_COMPAT_TLS MG_COMPAT_OPENSSL
+SSL *mg_compat_get_tls(struct mg_connection *c) {
+    return (SSL*) ((struct mg_tls*)c->tls)->ssl;
+}
+#elif MG_ENABLE_MBEDTLS
+#define MG_COMPAT_TLS MG_COMPAT_MBEDTLS
+mbedtls_ssl_context *mg_compat_get_tls(struct mg_connection *c) {
+    return (mbedtls_ssl_context*) &((struct mg_tls*)c->tls)->ssl;
+}
+#endif
+
 #define MG_COMPAT_EV_READ MG_EV_READ
 #define MG_COMPAT_RECV recv
 #define MG_COMPAT_SEND send
 #define MG_COMPAT_FN_DATA fn_data
 #define MG_COMPAT_IS_TLS(c) (c->tls != nullptr)
 #define MG_COMPAT_EV_TLS_HS MG_EV_TLS_HS
+#endif
+
+#ifndef MG_COMPAT_TLS
+#define MG_COMPAT_TLS MG_COMPAT_NOSSL
 #endif
 
 MongooseFtpClient::MongooseFtpClient(struct mg_mgr *mgr) : mgr(mgr) {
@@ -166,10 +217,18 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         return;
     }
 
+    //patch MG_COMPAT_EV_TLS_HS in MG v6.14
+    #if defined(MO_MG_VERSION_614)
+    if (ev == MG_EV_CONNECT && 
+            MG_COMPAT_IS_TLS(c) &&
+            ((c->flags & MG_F_SSL_HANDSHAKE_DONE) == MG_F_SSL_HANDSHAKE_DONE)) {
+        ev = MG_COMPAT_EV_TLS_HS;
+    }
+    #endif
+
     MongooseFtpClient& session = *reinterpret_cast<MongooseFtpClient*>(fn_data);
 
     if (ev == MG_EV_CONNECT) {
-        MO_DBG_WARN("Insecure connection (FTP)");
         MO_DBG_DEBUG("connection %s -- connected!", session.url.c_str());
         session.ctrl_opened = true;
     } else if (ev == MG_EV_CLOSE) {
@@ -206,7 +265,9 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 } else if (!strncmp("234", line, 3)) { // Proceed with TLS negotiation
                     MO_DBG_VERBOSE("upgrade to TLS");
                     #if defined(MO_MG_VERSION_614)
-                    //mg_set_ssl(...)
+                    mg_set_ssl(c,
+                        nullptr,
+                        nullptr); //TODO cert
                     #else
                     struct mg_tls_opts opts;
                     memset(&opts, 0, sizeof(opts));
@@ -372,6 +433,15 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         return;
     }
 
+    //patch MG_COMPAT_EV_TLS_HS in MG v6.14
+    #if defined(MO_MG_VERSION_614)
+    if (ev == MG_EV_CONNECT && 
+            MG_COMPAT_IS_TLS(c) &&
+            ((c->flags & MG_F_SSL_HANDSHAKE_DONE) == MG_F_SSL_HANDSHAKE_DONE)) {
+        ev = MG_COMPAT_EV_TLS_HS;
+    }
+    #endif
+
     MongooseFtpClient& session = *reinterpret_cast<MongooseFtpClient*>(fn_data);
 
     if (ev == MG_EV_CONNECT) {
@@ -379,22 +449,25 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         if (!session.proto.compare("ftps://") && !MG_COMPAT_IS_TLS(c)){ //tls not initialized yet
             MO_DBG_VERBOSE("upgrade to TLS");
             #if defined(MO_MG_VERSION_614)
-            //mg_set_ssl(...)
+            mg_set_ssl(c,
+                nullptr,
+                nullptr); //TODO cert
             #else
             struct mg_tls_opts opts;
             memset(&opts, 0, sizeof(opts));
             //opts.ca = CERT; //TODO
             mg_tls_init(c, &opts);
-
-            //reuse session of control conn for data conn
-            #if MG_ENABLE_OPENSSL
-            SSL_set_session(
-                ((struct mg_tls*)c->tls)->ssl,
-                SSL_get_session(((struct mg_tls*)session.ctrl_conn->tls)->ssl));
-            #elif MG_ENABLE_MBEDTLS
-            //TODO
             #endif
 
+            //reuse session of control conn for data conn
+            #if MG_COMPAT_TLS == MG_COMPAT_OPENSSL
+            SSL_set_session(
+                mg_compat_get_tls(c),
+                SSL_get_session(mg_compat_get_tls(session.ctrl_conn)));
+            #elif MG_COMPAT_TLS == MG_COMPAT_MBEDTLS
+            mbedtls_ssl_set_session(
+                mg_compat_get_tls(c),
+                mbedtls_ssl_get_session_pointer(mg_compat_get_tls(session.ctrl_conn)));
             #endif
         }
 
