@@ -24,6 +24,7 @@ void mg_compat_iobuf_resize(struct mbuf *buf, size_t new_size) {
 #define MG_COMPAT_RECV recv_mbuf
 #define MG_COMPAT_SEND send_mbuf
 #define MG_COMPAT_FN_DATA user_data
+#define MG_COMPAT_IS_TLS(c) ((c->flags & MG_F_SSL) == MG_F_SSL)
 #else
 void mg_compat_drain_conn(mg_connection *c) {
     c->is_draining = 1;
@@ -37,6 +38,8 @@ void mg_compat_iobuf_resize(struct mg_iobuf *buf, size_t new_size) {
 #define MG_COMPAT_RECV recv
 #define MG_COMPAT_SEND send
 #define MG_COMPAT_FN_DATA fn_data
+#define MG_COMPAT_IS_TLS(c) (c->tls != nullptr)
+#define MG_COMPAT_EV_TLS_HS MG_EV_TLS_HS
 #endif
 
 MongooseFtpClient::MongooseFtpClient(struct mg_mgr *mgr) : mgr(mgr) {
@@ -178,7 +181,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         }
         session.ctrl_conn = nullptr;
         (void)0;
-    } else if (ev == MG_COMPAT_EV_READ) {
+    } else if (ev == MG_COMPAT_EV_READ || ev == MG_COMPAT_EV_TLS_HS) {
         // read multi-line command
         char *line_next = (char*) c->MG_COMPAT_RECV.buf;
         while (line_next < (char*) c->MG_COMPAT_RECV.buf + c->MG_COMPAT_RECV.len) {
@@ -195,13 +198,47 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
             MO_DBG_DEBUG("RECV: %s", line);
 
-            if (!strncmp("530", line, 3) // Not logged in
-                    || !strncmp("220", line, 3)) {  // Service ready for new user
+            if (!session.proto.compare("ftps://")
+                    #if defined(MO_MG_VERSION_614)
+                    //nc->flags |= MG_F_SSL
+                    #else
+                    && c->tls == nullptr //tls not initialized yet
+                    #endif
+                    ) {
+                if (!strncmp("220", line, 3)) {
+                    MO_DBG_VERBOSE("start AUTH TLS");
+                    mg_printf(c, "AUTH TLS\r\n");
+                    break;
+                } else if (!strncmp("234", line, 3)) { // Proceed with TLS negotiation
+                    MO_DBG_VERBOSE("upgrade to TLS");
+                    #if defined(MO_MG_VERSION_614)
+                    //mg_set_ssl(...)
+                    #else
+                    struct mg_tls_opts opts;
+                    memset(&opts, 0, sizeof(opts));
+                    //opts.ca = CERT; //TODO
+                    mg_tls_init(c, &opts);
+                    #endif
+
+                    //keep msg in read buffer so that next poll will execute this state machine (enter case `ev == MG_COMPAT_EV_TLS_HS`)
+                    return;
+                } else {
+                    MO_DBG_WARN("TLS negotiation failure: %s", line);
+                    if (session.data_conn) {
+                        mg_compat_drain_conn(session.data_conn);
+                    }
+                    mg_printf(c, "QUIT\r\n");
+                    mg_compat_drain_conn(c);
+                    break;
+                }
+            } else if (!strncmp("530", line, 3)     // Not logged in
+                    || !strncmp("220", line, 3)     // Service ready for new user
+                    || ev == MG_COMPAT_EV_TLS_HS) { // Just completed AUTH TLS handshake
                 MO_DBG_DEBUG("select user %s", session.user.empty() ? "anonymous" : session.user.c_str());
                 mg_printf(c, "USER %s\r\n", session.user.empty() ? "anonymous" : session.user.c_str());
                 break;
             } else if (!strncmp("331", line, 3)) { // User name okay, need password
-                MO_DBG_DEBUG("enter pass %s", session.pass.c_str());
+                MO_DBG_DEBUG("enter pass %.2s***", session.pass.empty() ? "-" : session.pass.c_str());
                 mg_printf(c, "PASS %s\r\n", session.pass.c_str());
                 break;
             } else if (!strncmp("230", line, 3)) { // User logged in, proceed
@@ -210,6 +247,8 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 break;
             } else if (!strncmp("250", line, 3)) { // Requested file action okay, completed
                 MO_DBG_VERBOSE("enter passive mode");
+                mg_printf(c, "PBSZ 0\r\n");
+                mg_printf(c, "PROT P\r\n");
                 mg_printf(c, "PASV\r\n");
                 break;
             } else if (!strncmp("227", line, 3)) { // Entering Passive Mode (h1,h2,h3,h4,p1,p2)
@@ -284,13 +323,13 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 mg_compat_drain_conn(c);
                 break;
             } else {
+                break;
                 MO_DBG_WARN("unkown commad (closing connection): %s", line);
                 if (session.data_conn) {
                     mg_compat_drain_conn(session.data_conn);
                 }
                 mg_printf(c, "QUIT\r\n");
                 mg_compat_drain_conn(c);
-                break;
             }
 
             size_t consumed = line_next - line;
@@ -304,6 +343,97 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         }
         c->MG_COMPAT_RECV.len = 0;
     }
+}
+
+static int custom_mg_tls_err(struct mg_tls *tls, int res) {
+  int err = SSL_get_error(tls->ssl, res);
+  // We've just fetched the last error from the queue.
+  // Now we need to clear the error queue. If we do not, then the following
+  // can happen (actually reported):
+  //  - A new connection is accept()-ed with cert error (e.g. self-signed cert)
+  //  - Since all accept()-ed connections share listener's context,
+  //  - *ALL* SSL accepted connection report read error on the next poll cycle.
+  //    Thus a single errored connection can close all the rest, unrelated ones.
+  // Clearing the error keeps the shared SSL_CTX in an OK state.
+
+  if (err != 0) ERR_print_errors_fp(stderr);
+  ERR_clear_error();
+  if (err == SSL_ERROR_WANT_READ) return 0;
+  if (err == SSL_ERROR_WANT_WRITE) return 0;
+  return err;
+}
+
+void custom_mg_tls_init(struct mg_connection *c, const struct mg_tls_opts *opts, const struct mg_connection *session) {
+  struct mg_tls *tls = (struct mg_tls *) calloc(1, sizeof(struct mg_tls));
+  struct mg_tls *session_tls = (struct mg_tls *)session->tls;
+  const char *id = "mongoose";
+  int rc;
+
+  if (tls == NULL) {
+    mg_error(c, "TLS OOM");
+    goto fail;
+  }
+
+  MG_DEBUG(("%lu Setting TLS, CA: %s, cert: %s, key: %s", c->id,
+            opts->ca == NULL ? "null" : opts->ca,
+            opts->cert == NULL ? "null" : opts->cert,
+            opts->certkey == NULL ? "null" : opts->certkey));
+  tls->ctx = session_tls->ctx;
+  if ((tls->ssl = SSL_new(tls->ctx)) == NULL) {
+    mg_error(c, "SSL_new");
+    goto fail;
+  }
+  SSL_set_session_id_context(tls->ssl, (const uint8_t *) id,
+                             (unsigned) strlen(id));
+  SSL_set_session(tls->ssl, SSL_get_session(session_tls->ssl));
+
+  // Adopt SSL options of control channel
+  SSL_set_options(tls->ssl, SSL_get_options(session_tls->ssl));
+  SSL_set_verify(tls->ssl,
+    SSL_get_verify_mode(session_tls->ssl),
+    SSL_get_verify_callback(session_tls->ssl));
+
+  if (opts->cert != NULL && opts->cert[0] != '\0') {
+    const char *key = opts->certkey;
+    if (key == NULL) key = opts->cert;
+    if ((rc = SSL_use_certificate_file(tls->ssl, opts->cert, 1)) != 1) {
+      mg_error(c, "Invalid SSL cert, err %d", custom_mg_tls_err(tls, rc));
+      goto fail;
+    } else if ((rc = SSL_use_PrivateKey_file(tls->ssl, key, 1)) != 1) {
+      mg_error(c, "Invalid SSL key, err %d", custom_mg_tls_err(tls, rc));
+      goto fail;
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+    } else if ((rc = SSL_use_certificate_chain_file(tls->ssl, opts->cert)) !=
+               1) {
+      mg_error(c, "Invalid chain, err %d", custom_mg_tls_err(tls, rc));
+      goto fail;
+#endif
+    } else {
+      SSL_set_mode(tls->ssl, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+#if OPENSSL_VERSION_NUMBER > 0x10002000L
+      SSL_set_ecdh_auto(tls->ssl, 1);
+#endif
+    }
+  }
+  if (opts->ciphers != NULL) SSL_set_cipher_list(tls->ssl, opts->ciphers);
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+  if (opts->srvname.len > 0) {
+    char *s = mg_mprintf("%.*s", (int) opts->srvname.len, opts->srvname.ptr);
+    SSL_set1_host(tls->ssl, s);
+    free(s);
+  }
+#endif
+  c->tls = tls;
+  c->is_tls = 1;
+  c->is_tls_hs = 1;
+  if (c->is_client && c->is_resolving == 0 && c->is_connecting == 0) {
+    mg_tls_handshake(c);
+  }
+  MG_DEBUG(("%lu SSL %s OK", c->id, c->is_accepted ? "accept" : "client"));
+  return;
+fail:
+  c->is_closing = 1;
+  free(tls);
 }
 
 void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
@@ -339,8 +469,29 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
     MongooseFtpClient& session = *reinterpret_cast<MongooseFtpClient*>(fn_data);
 
-    if (ev == MG_EV_CONNECT) {
-        MO_DBG_WARN("Insecure connection (FTP)");
+    if (ev == MG_EV_CONNECT && !session.proto.compare("ftps://")
+            #if defined(MO_MG_VERSION_614)
+            //nc->flags |= MG_F_SSL
+            #else
+            && c->tls == nullptr //tls not initialized yet
+            #endif
+            ) {
+        MO_DBG_VERBOSE("upgrade to TLS");
+        #if defined(MO_MG_VERSION_614)
+        //mg_set_ssl(...)
+        #else
+        struct mg_tls_opts opts;
+        memset(&opts, 0, sizeof(opts));
+        //opts.ca = CERT; //TODO
+        //mg_tls_init(c, &opts);
+
+        //custom_mg_tls_init(c, &opts, session.ctrl_conn);
+
+        mg_tls_init(c, &opts);
+        SSL_set_session(((struct mg_tls*)c->tls)->ssl, SSL_get_session(((struct mg_tls*)session.ctrl_conn->tls)->ssl));
+
+        #endif
+
         MO_DBG_DEBUG("connection %s -- connected!", session.data_url.c_str());
         if (session.method == MongooseFtpClient::Method::Retrieve) {
             MO_DBG_DEBUG("get file %s", session.fname.c_str());
@@ -352,6 +503,21 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             MO_DBG_ERR("unsupported method");
             mg_printf(session.ctrl_conn, "QUIT\r\n");
         }
+    } else if ((ev == MG_EV_CONNECT && !session.proto.compare("ftp://")) ||
+                ev == MG_COMPAT_EV_TLS_HS) {
+#if 0
+        MO_DBG_DEBUG("connection %s -- connected!", session.data_url.c_str());
+        if (session.method == MongooseFtpClient::Method::Retrieve) {
+            MO_DBG_DEBUG("get file %s", session.fname.c_str());
+            mg_printf(session.ctrl_conn, "RETR %s\r\n", session.fname.c_str());
+        } else if (session.method == MongooseFtpClient::Method::Append) {
+            MO_DBG_DEBUG("post file %s", session.fname.c_str());
+            mg_printf(session.ctrl_conn, "APPE %s\r\n", session.fname.c_str());
+        } else {
+            MO_DBG_ERR("unsupported method");
+            mg_printf(session.ctrl_conn, "QUIT\r\n");
+        }
+#endif
     } else if (ev == MG_EV_CLOSE) {
         MO_DBG_DEBUG("connection %s -- closed", session.data_url.c_str());
         session.data_conn_accepted = false;
@@ -416,17 +582,20 @@ bool MongooseFtpClient::readUrl(const char *ftp_url_raw) {
         *c = tolower(*c);
     }
 
-    //check if protocol supported
-    if (!strncmp(ftp_url.c_str(), "ftps", strlen("ftps"))) {
-        MO_DBG_ERR("no TLS support. Please use ftp://");
-        return false;
-    } else if (strncmp(ftp_url.c_str(), "ftp://", strlen("ftp://"))) {
-        MO_DBG_ERR("protocol not supported. Please use ftp://");
+    //parse FTP URL: protocol specifier
+    if (!strncmp(ftp_url.c_str(), "ftps://", strlen("ftps://"))) {
+        //FTP over TLS (RFC 4217)
+        proto = "ftps://";
+    } else if (!strncmp(ftp_url.c_str(), "ftp://", strlen("ftp://"))) {
+        //FTP without security policies (RFC 959)
+        proto = "ftp://";
+    } else {
+        MO_DBG_ERR("protocol not supported. Please use ftps:// or ftp://");
         return false;
     }
 
     //parse FTP URL: dir and fname
-    auto dir_pos = ftp_url.find_first_of('/', strlen("ftp://"));
+    auto dir_pos = ftp_url.find_first_of('/', proto.length());
     if (dir_pos != std::string::npos) {
         auto fname_pos = ftp_url.find_last_of('/');
         dir = ftp_url.substr(dir_pos, fname_pos - dir_pos);
@@ -442,7 +611,7 @@ bool MongooseFtpClient::readUrl(const char *ftp_url_raw) {
 
     //parse FTP URL: user, pass, host, port
 
-    std::string user_pass_host_port = ftp_url.substr(strlen("ftp://"), dir_pos - strlen("ftp://"));
+    std::string user_pass_host_port = ftp_url.substr(proto.length(), dir_pos - proto.length());
     std::string user_pass, host_port;
     auto user_pass_delim = user_pass_host_port.find_first_of('@');
     if (user_pass_delim != std::string::npos) {
@@ -462,7 +631,7 @@ bool MongooseFtpClient::readUrl(const char *ftp_url_raw) {
         }
     }
 
-    MO_DBG_VERBOSE("parsed user: %s; pass: %s", user.c_str(), pass.c_str());
+    MO_DBG_VERBOSE("parsed user: %s; pass: %.2s***", user.c_str(), pass.empty() ? "-" : pass.c_str());
 
     if (host_port.empty()) {
         MO_DBG_ERR("missing hostname");

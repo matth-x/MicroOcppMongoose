@@ -24,6 +24,7 @@ public:
     struct mg_connection *ctrl_conn {nullptr};
     struct mg_connection *data_conn {nullptr};
     std::string file_location;
+    std::string proto;
     std::string url;
     std::string user;
     std::string pass;
@@ -54,12 +55,12 @@ public:
     MongooseFtpClient(struct mg_mgr *mgr);
     ~MongooseFtpClient();
 
-    bool getFile(const char *ftp_url, // ftp://[user[:pass]@]host[:port][/directory]/filename
+    bool getFile(const char *ftp_url, // ftp[s]://[user[:pass]@]host[:port][/directory]/filename
             std::function<size_t(unsigned char *data, size_t len)> fileWriter,
             std::function<void()> onClose);
     
     //append file
-    bool postFile(const char *ftp_url, // ftp://[user[:pass]@]host[:port][/directory]/filename
+    bool postFile(const char *ftp_url, // ftp[s]://[user[:pass]@]host[:port][/directory]/filename
             std::function<size_t(unsigned char *out, size_t buffsize)> fileReader, //write at most buffsize bytes into out-buffer. Return number of bytes written
             std::function<void()> onClose);
 };

@@ -30,6 +30,7 @@ target_include_directories(MicroOcppMongoose PUBLIC
                             )
 
 target_compile_definitions(MicroOcppMongoose PRIVATE
-    )
+    MG_ENABLE_OPENSSL=1
+)
 
 target_link_libraries(MicroOcppMongoose PUBLIC MicroOcpp)
