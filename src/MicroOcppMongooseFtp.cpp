@@ -198,13 +198,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
             MO_DBG_DEBUG("RECV: %s", line);
 
-            if (!session.proto.compare("ftps://")
-                    #if defined(MO_MG_VERSION_614)
-                    //nc->flags |= MG_F_SSL
-                    #else
-                    && c->tls == nullptr //tls not initialized yet
-                    #endif
-                    ) {
+            if (!session.proto.compare("ftps://") && !MG_COMPAT_IS_TLS(c)) { //tls not initialized yet
                 if (!strncmp("220", line, 3)) {
                     MO_DBG_VERBOSE("start AUTH TLS");
                     mg_printf(c, "AUTH TLS\r\n");
@@ -322,14 +316,16 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 mg_printf(c, "QUIT\r\n");
                 mg_compat_drain_conn(c);
                 break;
+            } else if (!strncmp("200", line, 3)) { //PBSZ -> 0 and PROT -> P accepted
+                MO_DBG_INFO("PBSZ/PROT success: %s", line);
             } else {
-                break;
                 MO_DBG_WARN("unkown commad (closing connection): %s", line);
                 if (session.data_conn) {
                     mg_compat_drain_conn(session.data_conn);
                 }
                 mg_printf(c, "QUIT\r\n");
                 mg_compat_drain_conn(c);
+                break;
             }
 
             size_t consumed = line_next - line;
@@ -343,97 +339,6 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         }
         c->MG_COMPAT_RECV.len = 0;
     }
-}
-
-static int custom_mg_tls_err(struct mg_tls *tls, int res) {
-  int err = SSL_get_error(tls->ssl, res);
-  // We've just fetched the last error from the queue.
-  // Now we need to clear the error queue. If we do not, then the following
-  // can happen (actually reported):
-  //  - A new connection is accept()-ed with cert error (e.g. self-signed cert)
-  //  - Since all accept()-ed connections share listener's context,
-  //  - *ALL* SSL accepted connection report read error on the next poll cycle.
-  //    Thus a single errored connection can close all the rest, unrelated ones.
-  // Clearing the error keeps the shared SSL_CTX in an OK state.
-
-  if (err != 0) ERR_print_errors_fp(stderr);
-  ERR_clear_error();
-  if (err == SSL_ERROR_WANT_READ) return 0;
-  if (err == SSL_ERROR_WANT_WRITE) return 0;
-  return err;
-}
-
-void custom_mg_tls_init(struct mg_connection *c, const struct mg_tls_opts *opts, const struct mg_connection *session) {
-  struct mg_tls *tls = (struct mg_tls *) calloc(1, sizeof(struct mg_tls));
-  struct mg_tls *session_tls = (struct mg_tls *)session->tls;
-  const char *id = "mongoose";
-  int rc;
-
-  if (tls == NULL) {
-    mg_error(c, "TLS OOM");
-    goto fail;
-  }
-
-  MG_DEBUG(("%lu Setting TLS, CA: %s, cert: %s, key: %s", c->id,
-            opts->ca == NULL ? "null" : opts->ca,
-            opts->cert == NULL ? "null" : opts->cert,
-            opts->certkey == NULL ? "null" : opts->certkey));
-  tls->ctx = session_tls->ctx;
-  if ((tls->ssl = SSL_new(tls->ctx)) == NULL) {
-    mg_error(c, "SSL_new");
-    goto fail;
-  }
-  SSL_set_session_id_context(tls->ssl, (const uint8_t *) id,
-                             (unsigned) strlen(id));
-  SSL_set_session(tls->ssl, SSL_get_session(session_tls->ssl));
-
-  // Adopt SSL options of control channel
-  SSL_set_options(tls->ssl, SSL_get_options(session_tls->ssl));
-  SSL_set_verify(tls->ssl,
-    SSL_get_verify_mode(session_tls->ssl),
-    SSL_get_verify_callback(session_tls->ssl));
-
-  if (opts->cert != NULL && opts->cert[0] != '\0') {
-    const char *key = opts->certkey;
-    if (key == NULL) key = opts->cert;
-    if ((rc = SSL_use_certificate_file(tls->ssl, opts->cert, 1)) != 1) {
-      mg_error(c, "Invalid SSL cert, err %d", custom_mg_tls_err(tls, rc));
-      goto fail;
-    } else if ((rc = SSL_use_PrivateKey_file(tls->ssl, key, 1)) != 1) {
-      mg_error(c, "Invalid SSL key, err %d", custom_mg_tls_err(tls, rc));
-      goto fail;
-#if OPENSSL_VERSION_NUMBER > 0x10100000L
-    } else if ((rc = SSL_use_certificate_chain_file(tls->ssl, opts->cert)) !=
-               1) {
-      mg_error(c, "Invalid chain, err %d", custom_mg_tls_err(tls, rc));
-      goto fail;
-#endif
-    } else {
-      SSL_set_mode(tls->ssl, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-#if OPENSSL_VERSION_NUMBER > 0x10002000L
-      SSL_set_ecdh_auto(tls->ssl, 1);
-#endif
-    }
-  }
-  if (opts->ciphers != NULL) SSL_set_cipher_list(tls->ssl, opts->ciphers);
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  if (opts->srvname.len > 0) {
-    char *s = mg_mprintf("%.*s", (int) opts->srvname.len, opts->srvname.ptr);
-    SSL_set1_host(tls->ssl, s);
-    free(s);
-  }
-#endif
-  c->tls = tls;
-  c->is_tls = 1;
-  c->is_tls_hs = 1;
-  if (c->is_client && c->is_resolving == 0 && c->is_connecting == 0) {
-    mg_tls_handshake(c);
-  }
-  MG_DEBUG(("%lu SSL %s OK", c->id, c->is_accepted ? "accept" : "client"));
-  return;
-fail:
-  c->is_closing = 1;
-  free(tls);
 }
 
 void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
@@ -469,28 +374,29 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
     MongooseFtpClient& session = *reinterpret_cast<MongooseFtpClient*>(fn_data);
 
-    if (ev == MG_EV_CONNECT && !session.proto.compare("ftps://")
+    if (ev == MG_EV_CONNECT) {
+        
+        if (!session.proto.compare("ftps://") && !MG_COMPAT_IS_TLS(c)){ //tls not initialized yet
+            MO_DBG_VERBOSE("upgrade to TLS");
             #if defined(MO_MG_VERSION_614)
-            //nc->flags |= MG_F_SSL
+            //mg_set_ssl(...)
             #else
-            && c->tls == nullptr //tls not initialized yet
+            struct mg_tls_opts opts;
+            memset(&opts, 0, sizeof(opts));
+            //opts.ca = CERT; //TODO
+            mg_tls_init(c, &opts);
+
+            //reuse session of control conn for data conn
+            #if MG_ENABLE_OPENSSL
+            SSL_set_session(
+                ((struct mg_tls*)c->tls)->ssl,
+                SSL_get_session(((struct mg_tls*)session.ctrl_conn->tls)->ssl));
+            #elif MG_ENABLE_MBEDTLS
+            //TODO
             #endif
-            ) {
-        MO_DBG_VERBOSE("upgrade to TLS");
-        #if defined(MO_MG_VERSION_614)
-        //mg_set_ssl(...)
-        #else
-        struct mg_tls_opts opts;
-        memset(&opts, 0, sizeof(opts));
-        //opts.ca = CERT; //TODO
-        //mg_tls_init(c, &opts);
 
-        //custom_mg_tls_init(c, &opts, session.ctrl_conn);
-
-        mg_tls_init(c, &opts);
-        SSL_set_session(((struct mg_tls*)c->tls)->ssl, SSL_get_session(((struct mg_tls*)session.ctrl_conn->tls)->ssl));
-
-        #endif
+            #endif
+        }
 
         MO_DBG_DEBUG("connection %s -- connected!", session.data_url.c_str());
         if (session.method == MongooseFtpClient::Method::Retrieve) {
@@ -503,21 +409,6 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             MO_DBG_ERR("unsupported method");
             mg_printf(session.ctrl_conn, "QUIT\r\n");
         }
-    } else if ((ev == MG_EV_CONNECT && !session.proto.compare("ftp://")) ||
-                ev == MG_COMPAT_EV_TLS_HS) {
-#if 0
-        MO_DBG_DEBUG("connection %s -- connected!", session.data_url.c_str());
-        if (session.method == MongooseFtpClient::Method::Retrieve) {
-            MO_DBG_DEBUG("get file %s", session.fname.c_str());
-            mg_printf(session.ctrl_conn, "RETR %s\r\n", session.fname.c_str());
-        } else if (session.method == MongooseFtpClient::Method::Append) {
-            MO_DBG_DEBUG("post file %s", session.fname.c_str());
-            mg_printf(session.ctrl_conn, "APPE %s\r\n", session.fname.c_str());
-        } else {
-            MO_DBG_ERR("unsupported method");
-            mg_printf(session.ctrl_conn, "QUIT\r\n");
-        }
-#endif
     } else if (ev == MG_EV_CLOSE) {
         MO_DBG_DEBUG("connection %s -- closed", session.data_url.c_str());
         session.data_conn_accepted = false;
