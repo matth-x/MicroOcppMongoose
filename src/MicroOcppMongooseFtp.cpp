@@ -6,6 +6,9 @@
 #include <MicroOcpp/Debug.h>
 #include <MicroOcpp/Platform.h>
 
+//test
+#define MO_FTP_OVERRIDE_CIPHERSUITES
+
 using namespace MicroOcpp;
 
 void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
@@ -60,6 +63,29 @@ mbedtls_ssl_context *mg_compat_get_tls(struct mg_connection *c) {
 #define MG_COMPAT_FN_DATA user_data
 #define MG_COMPAT_IS_TLS(c) ((c->flags & MG_F_SSL) == MG_F_SSL)
 #define MG_COMPAT_EV_TLS_HS 100500 //event number not used by MG
+
+#ifdef MO_FTP_OVERRIDE_CIPHERSUITES
+#define MO_FTP_USE_CIPHERSUITES \
+    "TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384:" \
+    "TLS-ECDHE-RSA-WITH-AES-256-CBC-SHA384:" \
+    "TLS-ECDHE-ECDSA-WITH-AES-128-GCM-SHA256:" \
+    "TLS-ECDHE-ECDSA-WITH-AES-128-CBC-SHA256:" \
+    "TLS-ECDHE-RSA-WITH-AES-128-GCM-SHA256:" \
+    "TLS-ECDHE-RSA-WITH-AES-128-CBC-SHA256:" \
+    "TLS-DHE-RSA-WITH-AES-128-GCM-SHA256:" \
+    "TLS-DHE-RSA-WITH-AES-128-CBC-SHA256:" \
+    "TLS-ECDH-ECDSA-WITH-AES-128-GCM-SHA256:" \
+    "TLS-ECDH-ECDSA-WITH-AES-128-CBC-SHA256:" \
+    "TLS-ECDH-ECDSA-WITH-AES-128-CBC-SHA:" \
+    "TLS-ECDH-RSA-WITH-AES-128-GCM-SHA256:" \
+    "TLS-ECDH-RSA-WITH-AES-128-CBC-SHA256:" \
+    "TLS-ECDH-RSA-WITH-AES-128-CBC-SHA:" \
+    "TLS-RSA-WITH-AES-128-GCM-SHA256:" \
+    "TLS-RSA-WITH-AES-128-CBC-SHA256:" \
+    "TLS-RSA-WITH-AES-128-CBC-SHA"
+#else
+#define MO_FTP_USE_CIPHERSUITES nullptr
+#endif
 #else
 void mg_compat_drain_conn(mg_connection *c) {
     c->is_draining = 1;
@@ -114,6 +140,25 @@ MongooseFtpClient::~MongooseFtpClient() {
         onClose();
         onClose = nullptr;
     }
+}
+
+void MongooseFtpClient::loop() {
+#if MO_MG_VERSION_614
+    //upgrade TLS in FtpClient::loop instead of mg_poll (MG flags cannot be manipulated in mg_poll)
+    if (tls_want_upgrade) {
+        tls_want_upgrade = false;
+
+        const char *err_msg = nullptr;
+        struct mg_ssl_if_conn_params params;
+        memset(&params, 0, sizeof(params));
+        params.ca_cert = "*"; //TODO cert
+        params.cipher_suites = MO_FTP_USE_CIPHERSUITES;
+        auto ret = mg_ssl_if_conn_init(ctrl_conn,
+            &params,
+            &err_msg);
+        MO_DBG_DEBUG("ssl init: %i %s", ret, err_msg ? err_msg : "");
+    }
+#endif
 }
 
 bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned char *data, size_t len)> fileWriter, std::function<void()> onClose) {
@@ -265,9 +310,8 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 } else if (!strncmp("234", line, 3)) { // Proceed with TLS negotiation
                     MO_DBG_VERBOSE("upgrade to TLS");
                     #if defined(MO_MG_VERSION_614)
-                    mg_set_ssl(c,
-                        nullptr,
-                        nullptr); //TODO cert
+                    MO_DBG_DEBUG("upgrade TLS in loop() call");
+                    session.tls_want_upgrade = true; //triggers TLS handler in FtpClient::loop() function
                     #else
                     struct mg_tls_opts opts;
                     memset(&opts, 0, sizeof(opts));

@@ -52,8 +52,15 @@ public:
 
     bool data_conn_accepted = false;
 
+#if MO_MG_VERSION_614
+    //upgrade TLS in FtpClient::loop instead of mg_poll (MG flags cannot be manipulated in mg_poll)
+    bool tls_want_upgrade = false;
+#endif
+
     MongooseFtpClient(struct mg_mgr *mgr);
     ~MongooseFtpClient();
+
+    void loop(); //need to loop during TLS negotiation when using Mongoose v6.14
 
     bool getFile(const char *ftp_url, // ftp[s]://[user[:pass]@]host[:port][/directory]/filename
             std::function<size_t(unsigned char *data, size_t len)> fileWriter,
