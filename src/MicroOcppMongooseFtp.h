@@ -52,14 +52,13 @@ public:
 
     bool data_conn_accepted = false;
 
-#if MO_MG_VERSION_614
-    //upgrade TLS in FtpClient::loop instead of mg_poll (MG flags cannot be manipulated in mg_poll)
+    //upgrade TLS in FtpClient::loop and not in cb fn (MG flags cannot be manipulated during mg_poll in MG v6.14)
     bool ctrl_tls_want_upgrade = false;
     bool data_tls_want_upgrade = false;
-#endif
+
     int upgradeTls(struct mg_connection *conn);
-    int reuseTlsSession(); //reuse ctrl_conn session for data_conn (after ssl-lib init and before ssl-lib handshake)
-    int data_tls_reuse_session(); //reuse ctrl_conn session for data_conn (after ssl-lib init and before ssl-lib handshake)
+    int upgradeTlsCtrlConn();
+    int upgradeTlsDataConn();
 
     MongooseFtpClient(struct mg_mgr *mgr);
     ~MongooseFtpClient();

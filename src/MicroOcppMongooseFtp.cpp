@@ -6,9 +6,6 @@
 #include <MicroOcpp/Debug.h>
 #include <MicroOcpp/Platform.h>
 
-//test
-#define MO_FTP_OVERRIDE_CIPHERSUITES
-
 using namespace MicroOcpp;
 
 void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
@@ -163,13 +160,43 @@ int MongooseFtpClient::upgradeTls(struct mg_connection *conn) {
     #endif
 }
 
-int MongooseFtpClient::reuseTlsSession() {
-    if (!data_conn || !mg_compat_get_tls(data_conn) ||
-            !ctrl_conn || !mg_compat_get_tls(ctrl_conn)) {
+int MongooseFtpClient::upgradeTlsCtrlConn() {
+    if (!ctrl_conn) {
         MO_DBG_ERR("internal error");
         return -1;
     }
 
+    return upgradeTls(ctrl_conn);
+}
+
+int MongooseFtpClient::upgradeTlsDataConn() {
+    if (!ctrl_conn || !data_conn || !mg_compat_get_tls(ctrl_conn)) {
+        MO_DBG_ERR("internal error");
+        return -1;
+    }
+
+    int err;
+
+    #if defined(MO_MG_VERSION_614)
+    err = upgradeTls(data_conn);
+    #else
+    int save_is_connecting = c->is_connecting;
+    c->is_connecting = 1; //do not perform tls_handshake during mg_tls_init
+    err = upgradeTls(c);
+    c->is_connecting = save_is_connecting;
+    #endif
+
+    if (err != 0) {
+        MO_DBG_ERR("TLS error: %i", err);
+        return err;
+    }
+
+    if (!mg_compat_get_tls(data_conn)) {
+        MO_DBG_ERR("internal error");
+        return -1;
+    }
+
+    //reuse ctrl conn session for data conn
     #if MG_COMPAT_TLS == MG_COMPAT_OPENSSL
     return SSL_set_session(
         mg_compat_get_tls(data_conn),
@@ -182,36 +209,26 @@ int MongooseFtpClient::reuseTlsSession() {
 }
 
 void MongooseFtpClient::loop() {
-#if MO_MG_VERSION_614
-    //upgrade TLS in FtpClient::loop instead of mg_poll (MG flags cannot be manipulated in mg_poll)
-    struct mg_connection *tls_upgrade = nullptr;
+    //upgrade TLS in FtpClient::loop instead of mg_poll (MG flags cannot be manipulated during mg_poll in v6.14)
     if (ctrl_tls_want_upgrade) {
         ctrl_tls_want_upgrade = false;
-        auto ret = upgradeTls(ctrl_conn);
+        auto ret = upgradeTlsCtrlConn();
         if (ret != 0) {
             MO_DBG_ERR("TLS error: %i", ret);
             return;
         }
     } else if (data_tls_want_upgrade) {
         data_tls_want_upgrade = false;
-        auto ret = upgradeTls(data_conn);
+        auto ret = upgradeTlsDataConn();
         if (ret != 0) {
             MO_DBG_ERR("TLS error: %i", ret);
             return;
-        } else {
-            MO_DBG_DEBUG("reuse TLS session of ctrl for data");
-            auto ret2 = reuseTlsSession();
-            if (ret2 != 0) {
-                MO_DBG_ERR("TLS error: %i", ret2);
-                return;
-            }
         }
 
         //re-enter data cb to continue FTP sequence
         int ev_data = 0;
         ftp_data_cb(data_conn, MG_EV_CONNECT, &ev_data, (void*)this);
     }
-#endif
 }
 
 bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned char *data, size_t len)> fileWriter, std::function<void()> onClose) {
@@ -362,12 +379,7 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     break;
                 } else if (!strncmp("234", line, 3)) { // Proceed with TLS negotiation
                     MO_DBG_VERBOSE("upgrade to TLS");
-                    #if defined(MO_MG_VERSION_614)
-                    MO_DBG_DEBUG("upgrade TLS in loop() call");
-                    session.ctrl_tls_want_upgrade = true; //triggers TLS handler in FtpClient::loop() function
-                    #else
-                    upgradeTls(c);
-                    #endif
+                    session.ctrl_tls_want_upgrade = true; //triggers TLS upgrade in FtpClient::loop() function (this "indirection" is needed for backwards compatibility with MG v6.14)
 
                     //keep msg in read buffer so that next poll will execute this state machine (enter case `ev == MG_COMPAT_EV_TLS_HS`)
                     return;
@@ -542,22 +554,8 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         
         if (!session.proto.compare("ftps://") && !MG_COMPAT_IS_TLS(c)){ //tls not initialized yet
             MO_DBG_VERBOSE("upgrade to TLS");
-            #if defined(MO_MG_VERSION_614)
-            MO_DBG_DEBUG("upgrade TLS in loop() call");
-            session.data_tls_want_upgrade = true; //triggers TLS handler in FtpClient::loop() function
+            session.data_tls_want_upgrade = true; //triggers TLS upgrade in FtpClient::loop() function (this "indirection" is needed for backwards compatibility with MG v6.14)
             return; //FtpClient::loop() function will re-enter this cb with event MG_EV_CONNECT
-            #else
-            struct mg_tls_opts opts;
-            memset(&opts, 0, sizeof(opts));
-            //opts.ca = CERT; //TODO
-            int save_is_connecting = c->is_connecting;
-            c->is_connecting = 1; //do not perform tls_handshake during mg_tls_init
-            upgradeTls(c);
-            c->is_connecting = save_is_connecting;
-
-            //reuse session of control conn for data conn
-            session.reuseTlsSession();
-            #endif
         }
 
         MO_DBG_DEBUG("connection %s -- connected!", session.data_url.c_str());
