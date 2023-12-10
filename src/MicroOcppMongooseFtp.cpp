@@ -142,21 +142,74 @@ MongooseFtpClient::~MongooseFtpClient() {
     }
 }
 
+int MongooseFtpClient::upgradeTls(struct mg_connection *conn) {
+    #if defined(MO_MG_VERSION_614)
+    const char *err_msg = nullptr;
+    struct mg_ssl_if_conn_params params;
+    memset(&params, 0, sizeof(params));
+    params.ca_cert = "*"; //TODO cert
+    params.cipher_suites = MO_FTP_USE_CIPHERSUITES;
+    auto ret = mg_ssl_if_conn_init(conn,
+        &params,
+        &err_msg);
+    MO_DBG_DEBUG("ssl init: %i %s", ret, err_msg ? err_msg : "");
+    return ret;
+    #else
+    struct mg_tls_opts opts;
+    memset(&opts, 0, sizeof(opts));
+    //opts.ca = CERT; //TODO
+    mg_tls_init(conn, &opts);
+    return 0;
+    #endif
+}
+
+int MongooseFtpClient::reuseTlsSession() {
+    if (!data_conn || !mg_compat_get_tls(data_conn) ||
+            !ctrl_conn || !mg_compat_get_tls(ctrl_conn)) {
+        MO_DBG_ERR("internal error");
+        return -1;
+    }
+
+    #if MG_COMPAT_TLS == MG_COMPAT_OPENSSL
+    return SSL_set_session(
+        mg_compat_get_tls(data_conn),
+        SSL_get_session(mg_compat_get_tls(ctrl_conn)));
+    #elif MG_COMPAT_TLS == MG_COMPAT_MBEDTLS
+    return mbedtls_ssl_set_session(
+        mg_compat_get_tls(data_conn),
+        mbedtls_ssl_get_session_pointer(mg_compat_get_tls(ctrl_conn)));
+    #endif
+}
+
 void MongooseFtpClient::loop() {
 #if MO_MG_VERSION_614
     //upgrade TLS in FtpClient::loop instead of mg_poll (MG flags cannot be manipulated in mg_poll)
-    if (tls_want_upgrade) {
-        tls_want_upgrade = false;
+    struct mg_connection *tls_upgrade = nullptr;
+    if (ctrl_tls_want_upgrade) {
+        ctrl_tls_want_upgrade = false;
+        auto ret = upgradeTls(ctrl_conn);
+        if (ret != 0) {
+            MO_DBG_ERR("TLS error: %i", ret);
+            return;
+        }
+    } else if (data_tls_want_upgrade) {
+        data_tls_want_upgrade = false;
+        auto ret = upgradeTls(data_conn);
+        if (ret != 0) {
+            MO_DBG_ERR("TLS error: %i", ret);
+            return;
+        } else {
+            MO_DBG_DEBUG("reuse TLS session of ctrl for data");
+            auto ret2 = reuseTlsSession();
+            if (ret2 != 0) {
+                MO_DBG_ERR("TLS error: %i", ret2);
+                return;
+            }
+        }
 
-        const char *err_msg = nullptr;
-        struct mg_ssl_if_conn_params params;
-        memset(&params, 0, sizeof(params));
-        params.ca_cert = "*"; //TODO cert
-        params.cipher_suites = MO_FTP_USE_CIPHERSUITES;
-        auto ret = mg_ssl_if_conn_init(ctrl_conn,
-            &params,
-            &err_msg);
-        MO_DBG_DEBUG("ssl init: %i %s", ret, err_msg ? err_msg : "");
+        //re-enter data cb to continue FTP sequence
+        int ev_data = 0;
+        ftp_data_cb(data_conn, MG_EV_CONNECT, &ev_data, (void*)this);
     }
 #endif
 }
@@ -232,8 +285,8 @@ bool MongooseFtpClient::postFile(const char *ftp_url_raw, std::function<size_t(u
 }
 
 void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
-    if (ev != 2) {
-        MO_DBG_VERBOSE("Cb fn with event: %d\n", ev);
+    if (ev != MG_EV_POLL) {
+        MO_DBG_DEBUG("Cb fn with event: %d\n", ev);
         (void)0;
     }
 
@@ -311,12 +364,9 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     MO_DBG_VERBOSE("upgrade to TLS");
                     #if defined(MO_MG_VERSION_614)
                     MO_DBG_DEBUG("upgrade TLS in loop() call");
-                    session.tls_want_upgrade = true; //triggers TLS handler in FtpClient::loop() function
+                    session.ctrl_tls_want_upgrade = true; //triggers TLS handler in FtpClient::loop() function
                     #else
-                    struct mg_tls_opts opts;
-                    memset(&opts, 0, sizeof(opts));
-                    //opts.ca = CERT; //TODO
-                    mg_tls_init(c, &opts);
+                    upgradeTls(c);
                     #endif
 
                     //keep msg in read buffer so that next poll will execute this state machine (enter case `ev == MG_COMPAT_EV_TLS_HS`)
@@ -447,8 +497,8 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 }
 
 void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
-    if (ev != 2) {
-        MO_DBG_VERBOSE("Cb fn with event: %d\n", ev);
+    if (ev != MG_EV_POLL) {
+        MO_DBG_DEBUG("Cb fn with event: %d\n", ev);
         (void)0;
     }
 
@@ -493,28 +543,20 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         if (!session.proto.compare("ftps://") && !MG_COMPAT_IS_TLS(c)){ //tls not initialized yet
             MO_DBG_VERBOSE("upgrade to TLS");
             #if defined(MO_MG_VERSION_614)
-            mg_set_ssl(c,
-                nullptr,
-                nullptr); //TODO cert
+            MO_DBG_DEBUG("upgrade TLS in loop() call");
+            session.data_tls_want_upgrade = true; //triggers TLS handler in FtpClient::loop() function
+            return; //FtpClient::loop() function will re-enter this cb with event MG_EV_CONNECT
             #else
             struct mg_tls_opts opts;
             memset(&opts, 0, sizeof(opts));
             //opts.ca = CERT; //TODO
             int save_is_connecting = c->is_connecting;
             c->is_connecting = 1; //do not perform tls_handshake during mg_tls_init
-            mg_tls_init(c, &opts);
+            upgradeTls(c);
             c->is_connecting = save_is_connecting;
-            #endif
 
             //reuse session of control conn for data conn
-            #if MG_COMPAT_TLS == MG_COMPAT_OPENSSL
-            SSL_set_session(
-                mg_compat_get_tls(c),
-                SSL_get_session(mg_compat_get_tls(session.ctrl_conn)));
-            #elif MG_COMPAT_TLS == MG_COMPAT_MBEDTLS
-            mbedtls_ssl_set_session(
-                mg_compat_get_tls(c),
-                mbedtls_ssl_get_session_pointer(mg_compat_get_tls(session.ctrl_conn)));
+            session.reuseTlsSession();
             #endif
         }
 
