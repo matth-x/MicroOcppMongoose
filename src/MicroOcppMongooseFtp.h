@@ -52,9 +52,11 @@ public:
 
     bool data_conn_accepted = false;
 
+#if defined(MO_MG_VERSION_614)
     //upgrade TLS in FtpClient::loop and not in cb fn (MG flags cannot be manipulated during mg_poll in MG v6.14)
     bool ctrl_tls_want_upgrade = false;
     bool data_tls_want_upgrade = false;
+#endif
 
     int upgradeTls(struct mg_connection *conn);
     int upgradeTlsCtrlConn();
