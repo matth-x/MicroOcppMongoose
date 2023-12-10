@@ -180,10 +180,10 @@ int MongooseFtpClient::upgradeTlsDataConn() {
     #if defined(MO_MG_VERSION_614)
     err = upgradeTls(data_conn);
     #else
-    int save_is_connecting = c->is_connecting;
-    c->is_connecting = 1; //do not perform tls_handshake during mg_tls_init
-    err = upgradeTls(c);
-    c->is_connecting = save_is_connecting;
+    int save_is_connecting = data_conn->is_connecting;
+    data_conn->is_connecting = 1; //do not perform tls_handshake during mg_tls_init
+    err = upgradeTls(data_conn);
+    data_conn->is_connecting = save_is_connecting;
     #endif
 
     if (err != 0) {
@@ -209,6 +209,7 @@ int MongooseFtpClient::upgradeTlsDataConn() {
 }
 
 void MongooseFtpClient::loop() {
+    #if defined(MO_MG_VERSION_614)
     //upgrade TLS in FtpClient::loop instead of mg_poll (MG flags cannot be manipulated during mg_poll in v6.14)
     if (ctrl_tls_want_upgrade) {
         ctrl_tls_want_upgrade = false;
@@ -229,6 +230,7 @@ void MongooseFtpClient::loop() {
         int ev_data = 0;
         ftp_data_cb(data_conn, MG_EV_CONNECT, &ev_data, (void*)this);
     }
+    #endif
 }
 
 bool MongooseFtpClient::getFile(const char *ftp_url_raw, std::function<size_t(unsigned char *data, size_t len)> fileWriter, std::function<void()> onClose) {
@@ -327,7 +329,6 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         } else {
             MO_DBG_ERR("invalid state %d", ev);
             mg_compat_drain_conn(c);
-            (void)0;
         }
         return;
     }
@@ -354,7 +355,6 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             session.onClose = nullptr;
         }
         session.ctrl_conn = nullptr;
-        (void)0;
     } else if (ev == MG_COMPAT_EV_READ || ev == MG_COMPAT_EV_TLS_HS) {
         // read multi-line command
         char *line_next = (char*) c->MG_COMPAT_RECV.buf;
@@ -379,7 +379,12 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     break;
                 } else if (!strncmp("234", line, 3)) { // Proceed with TLS negotiation
                     MO_DBG_VERBOSE("upgrade to TLS");
+
+                    #if defined(MO_MG_VERSION_614)
                     session.ctrl_tls_want_upgrade = true; //triggers TLS upgrade in FtpClient::loop() function (this "indirection" is needed for backwards compatibility with MG v6.14)
+                    #else
+                    session.upgradeTlsCtrlConn();
+                    #endif
 
                     //keep msg in read buffer so that next poll will execute this state machine (enter case `ev == MG_COMPAT_EV_TLS_HS`)
                     return;
@@ -534,7 +539,6 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         } else {
             MO_DBG_ERR("invalid state %d", ev);
             mg_compat_drain_conn(c);
-            (void)0;
         }
         return;
     }
@@ -554,8 +558,13 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         
         if (!session.proto.compare("ftps://") && !MG_COMPAT_IS_TLS(c)){ //tls not initialized yet
             MO_DBG_VERBOSE("upgrade to TLS");
+
+            #if defined(MO_MG_VERSION_614)
             session.data_tls_want_upgrade = true; //triggers TLS upgrade in FtpClient::loop() function (this "indirection" is needed for backwards compatibility with MG v6.14)
             return; //FtpClient::loop() function will re-enter this cb with event MG_EV_CONNECT
+            #else
+            session.upgradeTlsDataConn();
+            #endif
         }
 
         MO_DBG_DEBUG("connection %s -- connected!", session.data_url.c_str());
@@ -573,7 +582,6 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
         MO_DBG_DEBUG("connection %s -- closed", session.data_url.c_str());
         session.data_conn_accepted = false;
         session.data_conn = nullptr;
-        (void)0;
     } else if (ev == MG_COMPAT_EV_READ) {
         MO_DBG_DEBUG("read");
         //receive payload
@@ -618,6 +626,14 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     MO_DBG_DEBUG("finished file reading");
                     session.data_conn_accepted = false;
                     mg_compat_drain_conn(c);
+
+                    //on MG v7 and MbedTLS, call mbedtls_ssl_close_notify() when closing
+                    #if !defined(MO_MG_VERSION_614) && MG_COMPAT_TLS == MG_COMPAT_MBEDTLS
+                    if (auto tls = mg_compat_get_tls(c)) {
+                        MO_DBG_DEBUG("TLS shutdown");
+                        mbedtls_ssl_close_notify(tls);
+                    }
+                    #endif
                     return;
                 }
             }
