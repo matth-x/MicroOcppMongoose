@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- FTP over TLS support ([#3](https://github.com/matth-x/MicroOcppMongoose/pull/3))
+
 ## [1.0.0] - 2023-10-20
 
 _First release._

@@ -344,6 +344,8 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
 
     MongooseFtpClient& session = *reinterpret_cast<MongooseFtpClient*>(fn_data);
 
+    auto dbg_track_send_len = c->MG_COMPAT_SEND.len;
+
     if (ev == MG_EV_CONNECT) {
         MO_DBG_DEBUG("connection %s -- connected!", session.url.c_str());
         session.ctrl_opened = true;
@@ -413,8 +415,10 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 break;
             } else if (!strncmp("250", line, 3)) { // Requested file action okay, completed
                 MO_DBG_VERBOSE("enter passive mode");
-                mg_printf(c, "PBSZ 0\r\n");
-                mg_printf(c, "PROT P\r\n");
+                if (!session.proto.compare("ftps://")) {
+                    mg_printf(c, "PBSZ 0\r\n");
+                    mg_printf(c, "PROT P\r\n");
+                }
                 mg_printf(c, "PASV\r\n");
                 break;
             } else if (!strncmp("227", line, 3)) { // Entering Passive Mode (h1,h2,h3,h4,p1,p2)
@@ -468,7 +472,8 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                     break;
                 }
 
-            } else if (!strncmp("150", line, 3)) { // File status okay; about to open data connection
+            } else if (!strncmp("150", line, 3)    // File status okay; about to open data connection
+                    || !strncmp("125", line, 3)) { // Data connection already open
                 MO_DBG_DEBUG("data connection accepted");
                 session.data_conn_accepted = true;
                 (void)0;
@@ -510,6 +515,10 @@ void ftp_ctrl_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
             c->MG_COMPAT_RECV.len -= consumed;
         }
         c->MG_COMPAT_RECV.len = 0;
+    }
+
+    if (dbg_track_send_len != c->MG_COMPAT_SEND.len && c->MG_COMPAT_SEND.buf) {
+        MO_DBG_DEBUG("SEND: %.*s", (int) c->MG_COMPAT_SEND.len, (const char*) c->MG_COMPAT_SEND.buf);
     }
 }
 
@@ -553,6 +562,8 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
     #endif
 
     MongooseFtpClient& session = *reinterpret_cast<MongooseFtpClient*>(fn_data);
+
+    auto dbg_track_send_len = session.ctrl_conn->MG_COMPAT_SEND.len;
 
     if (ev == MG_EV_CONNECT) {
         
@@ -638,6 +649,10 @@ void ftp_data_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) 
                 }
             }
         }
+    }
+
+    if (dbg_track_send_len != session.ctrl_conn->MG_COMPAT_SEND.len && session.ctrl_conn->MG_COMPAT_SEND.buf) {
+        MO_DBG_DEBUG("SEND: %.*s", (int) session.ctrl_conn->MG_COMPAT_SEND.len, (const char*) session.ctrl_conn->MG_COMPAT_SEND.buf);
     }
 }
 

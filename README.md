@@ -31,6 +31,7 @@ Currently, the compatibility with the following FTP servers has been tested:
 | --- | --- | --- |
 | [vsftp](https://security.appspot.com/vsftpd.html) | ✔️ | ✔️ |
 | [Pure-FTPd](https://www.pureftpd.org/project/pure-ftpd/) | ✔️ | |
+| [Rebex](https://www.rebex.net/) | ✔️ | ✔️ |
 
 The following code snippet shows how to use the FTP client:
 
