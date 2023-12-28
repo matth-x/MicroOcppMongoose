@@ -52,6 +52,10 @@ extern "C" struct MG_TLS_INTERNAL {
 mbedtls_ssl_context *mg_compat_get_tls(struct mg_connection *c) {
     return (mbedtls_ssl_context*) ((struct MG_TLS_INTERNAL*)c->ssl_if_data)->ssl;
 }
+#else
+void *mg_compat_get_tls(struct mg_connection *c) {
+    return nullptr;
+}
 #endif
 
 #define MG_COMPAT_EV_READ MG_EV_RECV
@@ -101,6 +105,10 @@ SSL *mg_compat_get_tls(struct mg_connection *c) {
 #define MG_COMPAT_TLS MG_COMPAT_MBEDTLS
 mbedtls_ssl_context *mg_compat_get_tls(struct mg_connection *c) {
     return (mbedtls_ssl_context*) &((struct mg_tls*)c->tls)->ssl;
+}
+#else
+void *mg_compat_get_tls(struct mg_connection *c) {
+    return nullptr;
 }
 #endif
 
