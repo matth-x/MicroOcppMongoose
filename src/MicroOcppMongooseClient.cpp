@@ -7,12 +7,19 @@
 #include <MicroOcpp/Core/Configuration.h>
 #include <MicroOcpp/Debug.h>
 
+#define MO_AUTHKEY_LEN_MAX 20
+#define MO_AUTHKEY_HEX_LEN_MAX 40
+
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
 
 #if defined(MO_MG_VERSION_614)
 #define MO_MG_F_IS_MOcppMongooseClient MG_F_USER_2
 #endif
+
+namespace MicroOcpp {
+bool validateAuthorizationKeyHex(const char *auth_key);
+}
 
 using namespace MicroOcpp;
 
@@ -39,12 +46,17 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         readonly = true;
     }
 
+    if (!validateAuthorizationKeyHex(auth_key_factory)) {
+        auth_key_factory = nullptr;
+    }
+
     setting_backend_url_str = declareConfiguration<const char*>(
         MO_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MO_WSCONN_FN, readonly, true);
     setting_cb_id_str = declareConfiguration<const char*>(
         MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
     setting_auth_key_str = declareConfiguration<const char*>(
         "AuthorizationKey", auth_key_factory, MO_WSCONN_FN, readonly, true);
+    registerConfigurationValidator("AuthorizationKey", validateAuthorizationKeyHex);
     ws_ping_interval_int = declareConfiguration<int>(
         "WebSocketPingInterval", 5, MO_WSCONN_FN);
     reconnect_interval_int = declareConfiguration<int>(
@@ -253,7 +265,7 @@ void MOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
 }
 
 void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
-    if (!auth_key_cstr) {
+    if (!auth_key_cstr || !validateAuthorizationKeyHex(auth_key_cstr)) {
         MO_DBG_ERR("invalid argument");
         return;
     }
@@ -308,15 +320,26 @@ void MOcppMongooseClient::reloadConfigs() {
     }
 
     if (!auth_key.empty()) {
-        std::string token = cb_id + ":" + auth_key;
 
-        MO_DBG_DEBUG("auth Token=%s", token.c_str());
+        MO_DBG_DEBUG("auth Token=%s:%s (key will be converted to non-hex)", cb_id.c_str(), auth_key.c_str());
 
-        unsigned int base64_length = encode_base64_length(token.length());
+        unsigned char auth_key_unhexed [MO_AUTHKEY_LEN_MAX]; //const char *buf, size_t len, unsigned char *to
+        mg_unhex(auth_key.c_str(), auth_key.length(), auth_key_unhexed);
+
+        std::vector<unsigned char> token (cb_id.length() + 1 + auth_key.length() / 2); //cb_id:auth_key_non-hex
+        size_t len = 0;
+        memcpy(&token[0], cb_id.c_str(), cb_id.length());
+        len += cb_id.length();
+        token[len] = (unsigned char) ':';
+        len++;
+        memcpy(&token[len], auth_key_unhexed, auth_key.length() / 2);
+        len += auth_key.length() / 2;
+
+        unsigned int base64_length = encode_base64_length(len);
         std::vector<unsigned char> base64 (base64_length + 1);
 
         // encode_base64() places a null terminator automatically, because the output is a string
-        base64_length = encode_base64((const unsigned char*) token.c_str(), token.length(), &base64[0]);
+        base64_length = encode_base64(&token[0], len, &base64[0]);
 
         MO_DBG_DEBUG("auth64 len=%u, auth64 Token=%s", base64_length, &base64[0]);
 
@@ -474,3 +497,31 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     }
 }
 #endif
+
+bool MicroOcpp::validateAuthorizationKeyHex(const char *auth_key) {
+    if (!auth_key) {
+        return true; //nullptr (or "") means disable Auth
+    }
+    bool valid = true;
+    size_t i = 0;
+    while (i <= MO_AUTHKEY_HEX_LEN_MAX && auth_key[i] != '\0') {
+        //check if character is in 0-9, a-f, or A-F
+        if ( (auth_key[i] >= '0' && auth_key[i] <= '9') ||
+             (auth_key[i] >= 'a' && auth_key[i] <= 'f') ||
+             (auth_key[i] >= 'A' && auth_key[i] <= 'F')) {
+            //yes, it is
+            i++;
+        } else {
+            //no, it isn't
+            valid = false;
+            break;
+        }
+    }
+    valid &= i <= MO_AUTHKEY_HEX_LEN_MAX;
+    valid &= (i % 2) == 0;
+    if (!valid) {
+        MO_DBG_ERR("AuthorizationKey must be hex with at most 40 digits");
+        (void)0;
+    }
+    return valid;
+}
