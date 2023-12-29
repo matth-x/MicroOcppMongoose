@@ -3,7 +3,6 @@
 // GPL-3.0 License (see LICENSE)
 
 #include "MicroOcppMongooseClient.h"
-#include "base64.hpp"
 #include <MicroOcpp/Core/Configuration.h>
 #include <MicroOcpp/Debug.h>
 
@@ -323,27 +322,33 @@ void MOcppMongooseClient::reloadConfigs() {
 
         MO_DBG_DEBUG("auth Token=%s:%s (key will be converted to non-hex)", cb_id.c_str(), auth_key.c_str());
 
-        unsigned char auth_key_unhexed [MO_AUTHKEY_LEN_MAX]; //const char *buf, size_t len, unsigned char *to
+        unsigned char auth_key_unhexed [MO_AUTHKEY_LEN_MAX + 1]; //cs_from_hex or mg_unhex append 1 nullbyte
+#if MO_MG_VERSION_614
+        cs_from_hex((char*) auth_key_unhexed, auth_key.c_str(), auth_key.length());
+#else
         mg_unhex(auth_key.c_str(), auth_key.length(), auth_key_unhexed);
+#endif
 
         std::vector<unsigned char> token (cb_id.length() + 1 + auth_key.length() / 2); //cb_id:auth_key_non-hex
         size_t len = 0;
         memcpy(&token[0], cb_id.c_str(), cb_id.length());
         len += cb_id.length();
-        token[len] = (unsigned char) ':';
-        len++;
+        token[len++] = (unsigned char) ':';
         memcpy(&token[len], auth_key_unhexed, auth_key.length() / 2);
         len += auth_key.length() / 2;
 
-        unsigned int base64_length = encode_base64_length(len);
-        std::vector<unsigned char> base64 (base64_length + 1);
+        int base64_length = ((len + 2) / 3) * 4; //3 bytes base256 get encoded into 4 bytes base64. --> base64_len = ceil(len/3) * 4
+        std::vector<char> base64 (base64_length + 1);
 
-        // encode_base64() places a null terminator automatically, because the output is a string
-        base64_length = encode_base64(&token[0], len, &base64[0]);
+        // mg_base64_encode() places a null terminator automatically, because the output is a string
+        int base64_ret = mg_base64_encode(&token[0], len, &base64[0]);
+        if (base64_ret != base64_length) {
+            MO_DBG_ERR("encoder failure: len is %i, expected %i", base64_ret, base64_length);
+        }
 
         MO_DBG_DEBUG("auth64 len=%u, auth64 Token=%s", base64_length, &base64[0]);
 
-        basic_auth64 = (const char*) &base64[0];
+        basic_auth64 = &base64[0];
     } else {
         MO_DBG_DEBUG("no authentication");
         (void) 0;

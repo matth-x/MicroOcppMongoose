@@ -19,8 +19,6 @@ The setup is done if the following include statements work:
 #include <MicroOcpp.h>
 ```
 
-The last dependency is [base64-converter by Densaugeo](https://github.com/Densaugeo/base64_arduino), but it is already included in this repository. Thanks to [Densaugeo](https://github.com/Densaugeo) for providing it!
-
 ## License
 
 This project is licensed under the GPL as it uses the [Mongoose Embedded Networking Library](https://github.com/cesanta/mongoose). If you have a proprietary license of Mongoose, then the [MIT License](https://github.com/matth-x/MicroOcpp/blob/master/LICENSE) applies.
