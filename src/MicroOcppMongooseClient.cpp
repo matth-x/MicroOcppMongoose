@@ -3,9 +3,11 @@
 // GPL-3.0 License (see LICENSE)
 
 #include "MicroOcppMongooseClient.h"
-#include "base64.hpp"
 #include <MicroOcpp/Core/Configuration.h>
 #include <MicroOcpp/Debug.h>
+
+#define MO_AUTHKEY_LEN_MAX 20
+#define MO_AUTHKEY_HEX_LEN_MAX 40
 
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
@@ -13,6 +15,10 @@
 #if defined(MO_MG_VERSION_614)
 #define MO_MG_F_IS_MOcppMongooseClient MG_F_USER_2
 #endif
+
+namespace MicroOcpp {
+bool validateAuthorizationKeyHex(const char *auth_key);
+}
 
 using namespace MicroOcpp;
 
@@ -38,12 +44,17 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         readonly = true;
     }
 
+    if (!validateAuthorizationKeyHex(auth_key_factory)) {
+        auth_key_factory = nullptr;
+    }
+
     setting_backend_url_str = declareConfiguration<const char*>(
         MO_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MO_WSCONN_FN, readonly, true);
     setting_cb_id_str = declareConfiguration<const char*>(
         MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
     setting_auth_key_str = declareConfiguration<const char*>(
         "AuthorizationKey", auth_key_factory, MO_WSCONN_FN, readonly, true);
+    registerConfigurationValidator("AuthorizationKey", validateAuthorizationKeyHex);
 #if !MO_CA_CERT_LOCAL
     setting_ca_cert_str = declareConfiguration<const char*>(
         MO_CONFIG_EXT_PREFIX "CaCert", CA_cert_factory, MO_WSCONN_FN, readonly, true);
@@ -256,7 +267,7 @@ void MOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
 }
 
 void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
-    if (!auth_key_cstr) {
+    if (!auth_key_cstr || !validateAuthorizationKeyHex(auth_key_cstr)) {
         MO_DBG_ERR("invalid argument");
         return;
     }
@@ -329,19 +340,36 @@ void MOcppMongooseClient::reloadConfigs() {
     }
 
     if (!auth_key.empty()) {
-        std::string token = cb_id + ":" + auth_key;
 
-        MO_DBG_DEBUG("auth Token=%s", token.c_str());
+        MO_DBG_DEBUG("auth Token=%s:%s (key will be converted to non-hex)", cb_id.c_str(), auth_key.c_str());
 
-        unsigned int base64_length = encode_base64_length(token.length());
-        std::vector<unsigned char> base64 (base64_length + 1);
+        unsigned char auth_key_unhexed [MO_AUTHKEY_LEN_MAX + 1]; //cs_from_hex or mg_unhex append 1 nullbyte
+#if MO_MG_VERSION_614
+        cs_from_hex((char*) auth_key_unhexed, auth_key.c_str(), auth_key.length());
+#else
+        mg_unhex(auth_key.c_str(), auth_key.length(), auth_key_unhexed);
+#endif
 
-        // encode_base64() places a null terminator automatically, because the output is a string
-        base64_length = encode_base64((const unsigned char*) token.c_str(), token.length(), &base64[0]);
+        std::vector<unsigned char> token (cb_id.length() + 1 + auth_key.length() / 2); //cb_id:auth_key_non-hex
+        size_t len = 0;
+        memcpy(&token[0], cb_id.c_str(), cb_id.length());
+        len += cb_id.length();
+        token[len++] = (unsigned char) ':';
+        memcpy(&token[len], auth_key_unhexed, auth_key.length() / 2);
+        len += auth_key.length() / 2;
+
+        int base64_length = ((len + 2) / 3) * 4; //3 bytes base256 get encoded into 4 bytes base64. --> base64_len = ceil(len/3) * 4
+        std::vector<char> base64 (base64_length + 1);
+
+        // mg_base64_encode() places a null terminator automatically, because the output is a string
+        int base64_ret = mg_base64_encode(&token[0], len, &base64[0]);
+        if (base64_ret != base64_length) {
+            MO_DBG_ERR("encoder failure: len is %i, expected %i", base64_ret, base64_length);
+        }
 
         MO_DBG_DEBUG("auth64 len=%u, auth64 Token=%s", base64_length, &base64[0]);
 
-        basic_auth64 = (const char*) &base64[0];
+        basic_auth64 = &base64[0];
     } else {
         MO_DBG_DEBUG("no authentication");
         (void) 0;
@@ -492,3 +520,31 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     }
 }
 #endif
+
+bool MicroOcpp::validateAuthorizationKeyHex(const char *auth_key) {
+    if (!auth_key) {
+        return true; //nullptr (or "") means disable Auth
+    }
+    bool valid = true;
+    size_t i = 0;
+    while (i <= MO_AUTHKEY_HEX_LEN_MAX && auth_key[i] != '\0') {
+        //check if character is in 0-9, a-f, or A-F
+        if ( (auth_key[i] >= '0' && auth_key[i] <= '9') ||
+             (auth_key[i] >= 'a' && auth_key[i] <= 'f') ||
+             (auth_key[i] >= 'A' && auth_key[i] <= 'F')) {
+            //yes, it is
+            i++;
+        } else {
+            //no, it isn't
+            valid = false;
+            break;
+        }
+    }
+    valid &= i <= MO_AUTHKEY_HEX_LEN_MAX;
+    valid &= (i % 2) == 0;
+    if (!valid) {
+        MO_DBG_ERR("AuthorizationKey must be hex with at most 40 digits");
+        (void)0;
+    }
+    return valid;
+}

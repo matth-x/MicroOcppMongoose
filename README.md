@@ -19,8 +19,6 @@ The setup is done if the following include statements work:
 #include <MicroOcpp.h>
 ```
 
-The last dependency is [base64-converter by Densaugeo](https://github.com/Densaugeo/base64_arduino), but it is already included in this repository. Thanks to [Densaugeo](https://github.com/Densaugeo) for providing it!
-
 ## Additional FTP(s) Client
 
 This library also contains an experimental FTP client based on Mongoose. Its intended use is to download firmware binaries and to upload hardware diagnostics information as part of the OCPP UpdateFirmware / GetDiagnostics operations.
