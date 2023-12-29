@@ -6,6 +6,14 @@
 
 - FTP over TLS support ([#3](https://github.com/matth-x/MicroOcppMongoose/pull/3))
 
+### Fixed
+
+- Encode AuthorizationKey in Hex ([#4](https://github.com/matth-x/MicroOcppMongoose/pull/4))
+
+### Changed
+
+- Migrate to base64-encoder in Mongoose ([#4](https://github.com/matth-x/MicroOcppMongoose/pull/4))
+
 ## [1.0.0] - 2023-10-20
 
 _First release._
