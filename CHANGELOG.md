@@ -4,7 +4,11 @@
 
 ### Added
 
-- FTP over TLS support ([#3](https://github.com/matth-x/MicroOcppMongoose/pull/3))
+- ~FTP over TLS support ([#3](https://github.com/matth-x/MicroOcppMongoose/pull/3))~ (see [#5](https://github.com/matth-x/MicroOcppMongoose/pull/5))
+
+### Removed
+
+- FTP moved into a new project [MicroFtp](https://github.com/matth-x/MicroFtp) ([#5](https://github.com/matth-x/MicroOcppMongoose/pull/5))
 
 ## [1.0.0] - 2023-10-20
 
