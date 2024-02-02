@@ -7,7 +7,6 @@ cmake_minimum_required(VERSION 3.15)
 set(MO_MG_SRC
     src/MicroOcppMongooseClient_c.cpp
     src/MicroOcppMongooseClient.cpp
-    src/MicroOcppMongooseFtp.cpp
 )
 
 if(ESP_PLATFORM)
