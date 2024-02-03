@@ -375,6 +375,10 @@ unsigned long MOcppMongooseClient::getLastConnected() {
     return last_connection_established;
 }
 
+unsigned long MOcppMongooseClient::getLastConnAttempt() {
+    return last_reconnection_attempt;
+}
+
 #if defined(MO_MG_VERSION_614)
 
 void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
@@ -417,7 +421,7 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
             struct websocket_message *wm = (struct websocket_message *) ev_data;
 
             if (!osock->getReceiveTXTcallback()((const char *) wm->data, wm->size)) { //forward message to Context
-                MO_DBG_ERR("processing WS input failed");
+                MO_DBG_WARN("processing WS input failed");
                 (void)0;
             }
             osock->updateRcvTimer();

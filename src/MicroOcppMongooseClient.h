@@ -109,6 +109,7 @@ public:
     void updateRcvTimer();
     unsigned long getLastRecv(); //get time of last successful receive in millis
     unsigned long getLastConnected(); //get time of last connection establish
+    unsigned long getLastConnAttempt(); //get time of last reconnect attempt
 };
 
 }
