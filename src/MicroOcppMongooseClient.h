@@ -12,6 +12,7 @@
 
 #include "mongoose.h"
 #include <MicroOcpp/Core/Connection.h>
+#include <MicroOcpp/Version.h>
 
 #include <string>
 #include <memory>
@@ -61,6 +62,8 @@ private:
     bool connection_closing {false};
     ReceiveTXTcallback receiveTXTcallback = [] (const char *, size_t) {return false;};
 
+    ProtocolVersion protocolVersion;
+
     void reconnect();
 
     void maintainWsConn();
@@ -71,7 +74,8 @@ public:
             const char *charge_box_id_factory = nullptr,
             const char *auth_key_factory = nullptr,
             const char *CA_cert_factory = nullptr, //forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
-            std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem = nullptr);
+            std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem = nullptr,
+            ProtocolVersion protocolVersion = ProtocolVersion(1,6));
 
     ~MOcppMongooseClient();
 
