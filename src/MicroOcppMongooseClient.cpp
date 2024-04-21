@@ -1,5 +1,5 @@
 // matth-x/MicroOcppMongoose
-// Copyright Matthias Akstaller 2019 - 2023
+// Copyright Matthias Akstaller 2019 - 2024
 // GPL-3.0 License (see LICENSE)
 
 #include "MicroOcppMongooseClient.h"
@@ -23,7 +23,8 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
             const char *charge_box_id_factory,
             const char *auth_key_factory,
             const char *CA_cert_factory,
-            std::shared_ptr<FilesystemAdapter> filesystem) : mgr(mgr) {
+            std::shared_ptr<FilesystemAdapter> filesystem,
+            ProtocolVersion protocolVersion) : mgr(mgr), protocolVersion(protocolVersion) {
     
     bool readonly;
     
@@ -195,7 +196,7 @@ void MOcppMongooseClient::maintainWsConn() {
         this,
         opts,
         url.c_str(),
-        "ocpp1.6",
+        protocolVersion.major == 2 ? "ocpp2.0.1" : "ocpp1.6",
         *extra_headers ? extra_headers : nullptr);
 
     if (websocket) {
@@ -209,7 +210,8 @@ void MOcppMongooseClient::maintainWsConn() {
         url.c_str(), 
         ws_cb, 
         this, 
-        "%s%s%s\r\n", "Sec-WebSocket-Protocol: ocpp1.6",
+        "Sec-WebSocket-Protocol: %s%s%s\r\n",
+                      protocolVersion.major == 2 ? "ocpp2.0.1" : "ocpp1.6",
                       basic_auth64.empty() ? "" : "\r\nAuthorization: Basic ", 
                       basic_auth64.empty() ? "" : basic_auth64.c_str());     // Create client
 #endif
