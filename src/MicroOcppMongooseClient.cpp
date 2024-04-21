@@ -1,5 +1,5 @@
 // matth-x/MicroOcppMongoose
-// Copyright Matthias Akstaller 2019 - 2023
+// Copyright Matthias Akstaller 2019 - 2024
 // GPL-3.0 License (see LICENSE)
 
 #include "MicroOcppMongooseClient.h"
@@ -196,7 +196,7 @@ void MOcppMongooseClient::maintainWsConn() {
         this,
         opts,
         url.c_str(),
-        "ocpp1.6",
+        protocolVersion.major == 2 ? "ocpp2.0.1" : "ocpp1.6",
         *extra_headers ? extra_headers : nullptr);
 
     if (websocket) {
