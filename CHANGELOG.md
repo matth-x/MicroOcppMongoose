@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Adopt `bool isConnected()` from `Connection` interface
+- Adopt `bool isConnected()` from `Connection` interface ([#7](https://github.com/matth-x/MicroOcppMongoose/pull/7))
 
 ### Added
 
