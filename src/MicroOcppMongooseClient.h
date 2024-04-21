@@ -1,9 +1,9 @@
 // matth-x/MicroOcppMongoose
-// Copyright Matthias Akstaller 2019 - 2023
+// Copyright Matthias Akstaller 2019 - 2024
 // GPL-3.0 License (see LICENSE)
 
-#ifndef AOCPPMONGOOSECLIENT_H
-#define AOCPPMONGOOSECLIENT_H
+#ifndef MO_MONGOOSECLIENT_H
+#define MO_MONGOOSECLIENT_H
 
 #if defined(ARDUINO) //fix for conflicting defitions of IPAddress on Arduino
 #include <Arduino.h>
@@ -108,6 +108,7 @@ public:
 
     void setConnectionOpen(bool open);
     bool isConnectionOpen() {return connection_established && !connection_closing;}
+    bool isConnected() {return isConnectionOpen();}
     void cleanConnection();
 
     void updateRcvTimer();

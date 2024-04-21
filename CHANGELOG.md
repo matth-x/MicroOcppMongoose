@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Adopt `bool isConnected()` from `Connection` interface ([#7](https://github.com/matth-x/MicroOcppMongoose/pull/7))
+
 ### Added
 
 - ~FTP over TLS support ([#3](https://github.com/matth-x/MicroOcppMongoose/pull/3))~ (see [#5](https://github.com/matth-x/MicroOcppMongoose/pull/5))
