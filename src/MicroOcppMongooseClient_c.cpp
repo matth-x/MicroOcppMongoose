@@ -1,5 +1,5 @@
 // matth-x/MicroOcppMongoose
-// Copyright Matthias Akstaller 2019 - 2023
+// Copyright Matthias Akstaller 2019 - 2024
 // GPL-3.0 License (see LICENSE)
 
 #include "MicroOcppMongooseClient_c.h"
