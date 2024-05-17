@@ -5,7 +5,7 @@
 #ifndef MO_MONGOOSECLIENT_H
 #define MO_MONGOOSECLIENT_H
 
-#if defined(ARDUINO) //fix for conflicting defitions of IPAddress on Arduino
+#if defined(ARDUINO) //fix for conflicting definitions of IPAddress on Arduino
 #include <Arduino.h>
 #include <IPAddress.h>
 #endif
@@ -19,15 +19,6 @@
 
 #ifndef MO_WSCONN_FN
 #define MO_WSCONN_FN (MO_FILENAME_PREFIX "ws-conn.jsn")
-#endif
-
-/*
- * If you prefer not to have the TLS-certificate managed by OCPP, store it into
- * a file on the flash filesystem, define the following build flag as 1 and
- * pass the filename to the constructor instead of a default plain-text certificate.
-*/
-#ifndef MO_CA_CERT_LOCAL
-#define MO_CA_CERT_LOCAL 0
 #endif
 
 namespace MicroOcpp {
@@ -44,13 +35,10 @@ private:
     std::string url; //url = backend_url + '/' + cb_id
     std::string auth_key;
     std::string basic_auth64;
-    std::string ca_cert;
+    const char *ca_cert; //zero-copy. The host system must ensure that this pointer remains valid during the lifetime of this class
     std::shared_ptr<Configuration> setting_backend_url_str;
     std::shared_ptr<Configuration> setting_cb_id_str;
     std::shared_ptr<Configuration> setting_auth_key_str;
-#if !MO_CA_CERT_LOCAL
-    std::shared_ptr<Configuration> setting_ca_cert_str;
-#endif
     unsigned long last_status_dbg_msg {0}, last_recv {0};
     std::shared_ptr<Configuration> reconnect_interval_int; //minimum time between two connect trials in s
     unsigned long last_reconnection_attempt {-1UL / 2UL};
@@ -73,7 +61,7 @@ public:
             const char *backend_url_factory = nullptr, 
             const char *charge_box_id_factory = nullptr,
             const char *auth_key_factory = nullptr,
-            const char *CA_cert_factory = nullptr, //forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
+            const char *ca_cert = nullptr, //zero-copy, the string must outlive this class and mg_mgr. Forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
             std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem = nullptr,
             ProtocolVersion protocolVersion = ProtocolVersion(1,6));
 
@@ -102,7 +90,7 @@ public:
     const char *getBackendUrl() {return backend_url.c_str();}
     const char *getChargeBoxId() {return cb_id.c_str();}
     const char *getAuthKey() {return auth_key.c_str();}
-    const char *getCaCert() {return ca_cert.c_str();}
+    const char *getCaCert() {return ca_cert ? ca_cert : "";}
 
     const char *getUrl() {return url.c_str();}
 
