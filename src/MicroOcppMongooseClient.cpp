@@ -468,7 +468,10 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
                 //yes, disabled
                 ca_string = nullptr;
             }
-            struct mg_tls_opts opts = {.ca = ca_string};
+            struct mg_tls_opts opts;
+            memset(&opts, 0, sizeof(struct mg_tls_opts));
+            opts.ca = ca_string;
+            opts.srvname = mg_url_host(osock->getUrl());
             mg_tls_init(c, &opts);
         } else {
             MO_DBG_WARN("Insecure connection (WS)");
