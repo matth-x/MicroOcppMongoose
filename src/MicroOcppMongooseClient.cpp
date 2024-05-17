@@ -22,7 +22,7 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
             const char *backend_url_factory, 
             const char *charge_box_id_factory,
             const char *auth_key_factory,
-            const char *CA_cert_factory,
+            const char *ca_certificate,
             std::shared_ptr<FilesystemAdapter> filesystem,
             ProtocolVersion protocolVersion) : mgr(mgr), protocolVersion(protocolVersion) {
     
@@ -45,13 +45,6 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
     setting_auth_key_str = declareConfiguration<const char*>(
         "AuthorizationKey", auth_key_factory, MO_WSCONN_FN, readonly, true);
-#if !MO_CA_CERT_LOCAL
-    setting_ca_cert_str = declareConfiguration<const char*>(
-        MO_CONFIG_EXT_PREFIX "CaCert", CA_cert_factory, MO_WSCONN_FN, readonly, true);
-#else
-    ca_cert = CA_cert_factory ? CA_cert_factory : "";
-#endif
-
     ws_ping_interval_int = declareConfiguration<int>(
         "WebSocketPingInterval", 5, MO_WSCONN_FN);
     reconnect_interval_int = declareConfiguration<int>(
@@ -60,6 +53,8 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         MO_CONFIG_EXT_PREFIX "StaleTimeout", 300, MO_WSCONN_FN);
 
     configuration_load(MO_WSCONN_FN); //load configs with values stored on flash
+
+    ca_cert = ca_certificate;
 
     reloadConfigs(); //load WS creds with configs values
 
@@ -166,7 +161,7 @@ void MOcppMongooseClient::maintainWsConn() {
     struct mg_connect_opts opts;
     memset(&opts, 0, sizeof(opts));
 
-    const char *ca_string = ca_cert.empty() ? "*" : ca_cert.c_str();
+    const char *ca_string = ca_cert ? ca_cert : "*"; //"*" enables TLS but disables CA verification
 
     //Check if SSL is disabled, i.e. if URL starts with "ws:"
     if (url.length() >= strlen("ws:") &&
@@ -270,19 +265,7 @@ void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
 }
 
 void MOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
-    if (!ca_cert_cstr) {
-        MO_DBG_ERR("invalid argument");
-        return;
-    }
-
-#if !MO_CA_CERT_LOCAL
-    if (setting_ca_cert_str) {
-        setting_ca_cert_str->setString(ca_cert_cstr);
-        configuration_save();
-    }
-#else
     ca_cert = ca_cert_cstr; //updated ca_cert takes immediate effect
-#endif
 }
 
 void MOcppMongooseClient::reloadConfigs() {
@@ -303,12 +286,6 @@ void MOcppMongooseClient::reloadConfigs() {
     if (setting_auth_key_str) {
         auth_key = setting_auth_key_str->getString();
     }
-
-#if !MO_CA_CERT_LOCAL
-    if (setting_ca_cert_str) {
-        ca_cert = setting_ca_cert_str->getString();
-    }
-#endif
 
     /*
      * determine new URL and auth token with updated WS credentials
@@ -464,7 +441,7 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
         // If target URL is SSL/TLS, command client connection to use TLS
         if (mg_url_is_ssl(osock->getUrl())) {
             const char *ca_string = osock->getCaCert();
-            if (ca_string && *ca_string == '\0') { //check if certificate validation is disabled by passing an empty string
+            if (ca_string && *ca_string == '\0') { //check if certificate verification is disabled (cert string is empty)
                 //yes, disabled
                 ca_string = nullptr;
             }

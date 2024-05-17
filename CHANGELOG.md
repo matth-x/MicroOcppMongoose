@@ -5,6 +5,7 @@
 ### Changed
 
 - Adopt `bool isConnected()` from `Connection` interface ([#7](https://github.com/matth-x/MicroOcppMongoose/pull/7))
+- Do not copy cert into heap memory
 
 ### Added
 
@@ -15,6 +16,7 @@
 ### Removed
 
 - FTP moved into a new project [MicroFtp](https://github.com/matth-x/MicroFtp) ([#5](https://github.com/matth-x/MicroOcppMongoose/pull/5))
+- Custom config `Cst_CaCert`
 
 ## [1.0.0] - 2023-10-20
 
