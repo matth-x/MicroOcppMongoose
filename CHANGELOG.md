@@ -10,7 +10,7 @@
 
 - ~FTP over TLS support ([#3](https://github.com/matth-x/MicroOcppMongoose/pull/3))~ (see [#5](https://github.com/matth-x/MicroOcppMongoose/pull/5))
 - OCPP 2.0.1 compatibility ([#6](https://github.com/matth-x/MicroOcppMongoose/pull/6))
-- Send host name in TLS handshake
+- Send host name in TLS handshake ([#9](https://github.com/matth-x/MicroOcppMongoose/pull/9))
 
 ### Removed
 
