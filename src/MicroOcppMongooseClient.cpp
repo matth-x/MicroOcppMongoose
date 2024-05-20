@@ -231,10 +231,7 @@ void MOcppMongooseClient::maintainWsConn() {
         }
 
         // mg_base64_encode() places a null terminator automatically, because the output is a c-string
-        int base64_ret = mg_base64_encode(token, len, base64);
-        if (base64_ret != base64_length) {
-            MO_DBG_ERR("encoder failure: len is %i, expected %i", base64_ret, base64_length);
-        }
+        mg_base64_encode(token, len, base64);
         delete[] token;
 
         MO_DBG_DEBUG("auth64 len=%u, auth64 Token=%s", base64_length, base64);
