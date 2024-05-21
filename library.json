@@ -1,6 +1,6 @@
 {
     "name": "MicroOcppMongoose",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Mongoose Adapter for the MicroOcpp Client",
     "keywords": "OCPP, 1.6, OCPP 1.6, Smart Energy, Smart Charging, client, ESP8266, ESP32, Arduino, EVSE, Charge Point, Mongoose",
     "repository":
@@ -27,14 +27,11 @@
             "src/MicroOcppMongooseClient_c.h",
             "src/MicroOcppMongooseClient.cpp",
             "src/MicroOcppMongooseClient.h",
-            "src/MicroOcppMongooseFtp.cpp",
-            "src/MicroOcppMongooseFtp.h",
-            "src/base64.hpp",
+            "CHANGELOG.md",
             "CMakeLists.txt",
             "library.json",
             "LICENSE",
-            "README.md",
-            "CHANGELOG.md"
+            "README.md"
         ]
     }
 }
