@@ -1,8 +1,6 @@
 # MicroOcppMongoose
 Mongoose WebSocket adapter for MicroOcpp
 
-**Formerly ArduinoOcppMongoose**: *see the statement on the former ArduinoOcpp [project site](https://github.com/matth-x/MicroOcpp)*
-
 ## Dependencies
 
 The following projects must be available on the include path:
@@ -18,8 +16,6 @@ The setup is done if the following include statements work:
 #include <ArduinoJson.h>
 #include <MicroOcpp.h>
 ```
-
-The last dependency is [base64-converter by Densaugeo](https://github.com/Densaugeo/base64_arduino), but it is already included in this repository. Thanks to [Densaugeo](https://github.com/Densaugeo) for providing it!
 
 ## License
 

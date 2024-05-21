@@ -3,7 +3,6 @@
 // GPL-3.0 License (see LICENSE)
 
 #include "MicroOcppMongooseClient.h"
-#include "base64.hpp"
 #include <MicroOcpp/Core/Configuration.h>
 #include <MicroOcpp/Debug.h>
 
@@ -14,6 +13,10 @@
 #define MO_MG_F_IS_MOcppMongooseClient MG_F_USER_2
 #endif
 
+namespace MicroOcpp {
+bool validateAuthorizationKeyHex(const char *auth_key_hex);
+}
+
 using namespace MicroOcpp;
 
 void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
@@ -21,7 +24,7 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
 MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
             const char *backend_url_factory, 
             const char *charge_box_id_factory,
-            const char *auth_key_factory,
+            unsigned char *auth_key_factory, size_t auth_key_factory_len,
             const char *ca_certificate,
             std::shared_ptr<FilesystemAdapter> filesystem,
             ProtocolVersion protocolVersion) : mgr(mgr), protocolVersion(protocolVersion) {
@@ -43,8 +46,22 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         MO_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MO_WSCONN_FN, readonly, true);
     setting_cb_id_str = declareConfiguration<const char*>(
         MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
-    setting_auth_key_str = declareConfiguration<const char*>(
-        "AuthorizationKey", auth_key_factory, MO_WSCONN_FN, readonly, true);
+    
+    if (auth_key_factory_len > MO_AUTHKEY_LEN_MAX) {
+        MO_DBG_WARN("auth_key_factory too long - will be cropped");
+        auth_key_factory_len = MO_AUTHKEY_LEN_MAX;
+    }
+    char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
+    auth_key_hex[0] = '\0';
+    if (auth_key_factory) {
+        for (size_t i = 0; i < auth_key_factory_len; i += 2) {
+            snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key_factory[i]);
+        }
+    }
+    setting_auth_key_hex_str = declareConfiguration<const char*>(
+        "AuthorizationKey", auth_key_hex, MO_WSCONN_FN, readonly, true);
+    registerConfigurationValidator("AuthorizationKey", validateAuthorizationKeyHex);
+
     ws_ping_interval_int = declareConfiguration<int>(
         "WebSocketPingInterval", 5, MO_WSCONN_FN);
     reconnect_interval_int = declareConfiguration<int>(
@@ -65,6 +82,24 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
 #endif
 
     maintainWsConn();
+}
+
+MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
+            const char *backend_url_factory, 
+            const char *charge_box_id_factory,
+            const char *auth_key_factory,
+            const char *ca_certificate,
+            std::shared_ptr<FilesystemAdapter> filesystem,
+            ProtocolVersion protocolVersion) :
+
+    MOcppMongooseClient(mgr,
+            backend_url_factory,
+            charge_box_id_factory,
+            (unsigned char *)auth_key_factory, auth_key_factory ? strlen(auth_key_factory) : 0,
+            ca_certificate,
+            filesystem,
+            protocolVersion) {
+
 }
 
 MOcppMongooseClient::~MOcppMongooseClient() {
@@ -156,6 +191,59 @@ void MOcppMongooseClient::maintainWsConn() {
 
     last_reconnection_attempt = mocpp_tick_ms();
 
+    /*
+     * determine auth token
+     */
+
+    std::string basic_auth64;
+
+    if (auth_key_len > 0) {
+
+        #if MO_DBG_LEVEL >= MO_DL_DEBUG
+        {
+            char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
+            auth_key_hex[0] = '\0';
+            for (size_t i = 0; i < auth_key_len; i++) {
+                snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key[i]);
+            }
+            MO_DBG_DEBUG("auth Token=%s:%s (key will be converted to non-hex)", cb_id.c_str(), auth_key_hex);
+        }
+        #endif //MO_DBG_LEVEL >= MO_DL_DEBUG
+
+        unsigned char *token = new unsigned char[cb_id.length() + 1 + auth_key_len]; //cb_id:auth_key
+        if (!token) {
+            //OOM
+            return;
+        }
+        size_t len = 0;
+        memcpy(token, cb_id.c_str(), cb_id.length());
+        len += cb_id.length();
+        token[len++] = (unsigned char) ':';
+        memcpy(token + len, auth_key, auth_key_len);
+        len += auth_key_len;
+
+        int base64_length = ((len + 2) / 3) * 4; //3 bytes base256 get encoded into 4 bytes base64. --> base64_len = ceil(len/3) * 4
+        char *base64 = new char[base64_length + 1];
+        if (!base64) {
+            //OOM
+            delete[] token;
+            return;
+        }
+
+        // mg_base64_encode() places a null terminator automatically, because the output is a c-string
+        mg_base64_encode(token, len, base64);
+        delete[] token;
+
+        MO_DBG_DEBUG("auth64 len=%u, auth64 Token=%s", base64_length, base64);
+
+        basic_auth64 = &base64[0];
+
+        delete[] base64;
+    } else {
+        MO_DBG_DEBUG("no authentication");
+        (void) 0;
+    }
+
 #if defined(MO_MG_VERSION_614)
 
     struct mg_connect_opts opts;
@@ -177,7 +265,7 @@ void MOcppMongooseClient::maintainWsConn() {
 
     char extra_headers [128] = {'\0'};
 
-    if (!auth_key.empty()) {
+    if (!basic_auth64.empty()) {
         auto ret = snprintf(extra_headers, 128, "Authorization: Basic %s\r\n", basic_auth64.c_str());
         if (ret < 0 || ret >= 128) {
             MO_DBG_ERR("Basic Authentication failed: %d", ret);
@@ -258,8 +346,23 @@ void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
         return;
     }
 
-    if (setting_auth_key_str) {
-        setting_auth_key_str->setString(auth_key_cstr);
+    return setAuthKey((const unsigned char*)auth_key_cstr, strlen(auth_key_cstr));
+}
+
+void MOcppMongooseClient::setAuthKey(const unsigned char *auth_key, size_t len) {
+    if (!auth_key || len > MO_AUTHKEY_LEN_MAX) {
+        MO_DBG_ERR("invalid argument");
+        return;
+    }
+
+    char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
+    auth_key_hex[0] = '\0';
+    for (size_t i = 0; i < len; i += 2) {
+        snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key[i]);
+    }
+
+    if (setting_auth_key_hex_str) {
+        setting_auth_key_hex_str->setString(auth_key_hex);
         configuration_save();
     }
 }
@@ -283,48 +386,46 @@ void MOcppMongooseClient::reloadConfigs() {
         cb_id = setting_cb_id_str->getString();
     }
 
-    if (setting_auth_key_str) {
-        auth_key = setting_auth_key_str->getString();
+    if (setting_auth_key_hex_str) {
+        auto auth_key_hex = setting_auth_key_hex_str->getString();
+
+        #if MO_MG_VERSION_614
+        cs_from_hex((char*)auth_key, auth_key_hex, strlen(auth_key_hex));
+        #else
+        mg_unhex(auth_key_hex, strlen(auth_key_hex), auth_key);
+        #endif
+
+        auth_key_len = strlen(setting_auth_key_hex_str->getString()) / 2;
+        auth_key[auth_key_len] = '\0'; //need null-termination as long as deprecated `const char *getAuthKey()` exists
     }
 
     /*
-     * determine new URL and auth token with updated WS credentials
+     * determine new URL with updated WS credentials
      */
 
     url.clear();
-    basic_auth64.clear();
 
     if (backend_url.empty()) {
         MO_DBG_DEBUG("empty URL closes connection");
         return;
-    } else {
-        url = backend_url;
-
-        if (url.back() != '/' && !cb_id.empty()) {
-            url.append("/");
-        }
-
-        url.append(cb_id);
     }
 
-    if (!auth_key.empty()) {
-        std::string token = cb_id + ":" + auth_key;
+    url = backend_url;
 
-        MO_DBG_DEBUG("auth Token=%s", token.c_str());
-
-        unsigned int base64_length = encode_base64_length(token.length());
-        std::vector<unsigned char> base64 (base64_length + 1);
-
-        // encode_base64() places a null terminator automatically, because the output is a string
-        base64_length = encode_base64((const unsigned char*) token.c_str(), token.length(), &base64[0]);
-
-        MO_DBG_DEBUG("auth64 len=%u, auth64 Token=%s", base64_length, &base64[0]);
-
-        basic_auth64 = (const char*) &base64[0];
-    } else {
-        MO_DBG_DEBUG("no authentication");
-        (void) 0;
+    if (url.back() != '/' && !cb_id.empty()) {
+        url.append("/");
     }
+    url.append(cb_id);
+}
+
+int MOcppMongooseClient::printAuthKey(unsigned char *buf, size_t size) {
+    if (!buf || size < auth_key_len) {
+        MO_DBG_ERR("invalid argument");
+        return -1;
+    }
+
+    memcpy(buf, auth_key, auth_key_len);
+    return (int)auth_key_len;
 }
 
 void MOcppMongooseClient::setConnectionOpen(bool open) {
@@ -474,3 +575,31 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
     }
 }
 #endif
+
+bool MicroOcpp::validateAuthorizationKeyHex(const char *auth_key_hex) {
+    if (!auth_key_hex) {
+        return true; //nullptr (or "") means disable Auth
+    }
+    bool valid = true;
+    size_t i = 0;
+    while (i <= 2 * MO_AUTHKEY_LEN_MAX && auth_key_hex[i] != '\0') {
+        //check if character is in 0-9, a-f, or A-F
+        if ( (auth_key_hex[i] >= '0' && auth_key_hex[i] <= '9') ||
+             (auth_key_hex[i] >= 'a' && auth_key_hex[i] <= 'f') ||
+             (auth_key_hex[i] >= 'A' && auth_key_hex[i] <= 'F')) {
+            //yes, it is
+            i++;
+        } else {
+            //no, it isn't
+            valid = false;
+            break;
+        }
+    }
+    valid &= auth_key_hex[i] == '\0';
+    valid &= (i % 2) == 0;
+    if (!valid) {
+        MO_DBG_ERR("AuthorizationKey must be hex with at most 20 octets");
+        (void)0;
+    }
+    return valid;
+}

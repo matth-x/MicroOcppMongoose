@@ -1,9 +1,9 @@
 // matth-x/MicroOcppMongoose
-// Copyright Matthias Akstaller 2019 - 2023
+// Copyright Matthias Akstaller 2019 - 2024
 // GPL-3.0 License (see LICENSE)
 
-#ifndef AOCPPMONGOOSECLIENT_C_H
-#define AOCPPMONGOOSECLIENT_C_H
+#ifndef MO_MONGOOSECLIENT_C_H
+#define MO_MONGOOSECLIENT_C_H
 
 #if defined(__cplusplus) && defined(ARDUINO) //fix for conflicting defitions of IPAddress on Arduino
 #include <Arduino.h>

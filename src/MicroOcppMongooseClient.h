@@ -21,6 +21,8 @@
 #define MO_WSCONN_FN (MO_FILENAME_PREFIX "ws-conn.jsn")
 #endif
 
+#define MO_AUTHKEY_LEN_MAX 20 //AuthKey in Bytes. Hex value has double length
+
 namespace MicroOcpp {
 
 class FilesystemAdapter;
@@ -33,12 +35,12 @@ private:
     std::string backend_url;
     std::string cb_id;
     std::string url; //url = backend_url + '/' + cb_id
-    std::string auth_key;
-    std::string basic_auth64;
+    unsigned char auth_key [MO_AUTHKEY_LEN_MAX + 1]; //AuthKey in bytes encoding ("FF01" = {0xFF, 0x01})
+    size_t auth_key_len;
     const char *ca_cert; //zero-copy. The host system must ensure that this pointer remains valid during the lifetime of this class
     std::shared_ptr<Configuration> setting_backend_url_str;
     std::shared_ptr<Configuration> setting_cb_id_str;
-    std::shared_ptr<Configuration> setting_auth_key_str;
+    std::shared_ptr<Configuration> setting_auth_key_hex_str;
     unsigned long last_status_dbg_msg {0}, last_recv {0};
     std::shared_ptr<Configuration> reconnect_interval_int; //minimum time between two connect trials in s
     unsigned long last_reconnection_attempt {-1UL / 2UL};
@@ -57,6 +59,15 @@ private:
     void maintainWsConn();
 
 public:
+    MOcppMongooseClient(struct mg_mgr *mgr, 
+            const char *backend_url_factory, 
+            const char *charge_box_id_factory,
+            unsigned char *auth_key_factory, size_t auth_key_factory_len,
+            const char *ca_cert = nullptr, //zero-copy, the string must outlive this class and mg_mgr. Forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
+            std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem = nullptr,
+            ProtocolVersion protocolVersion = ProtocolVersion(1,6));
+    
+    //DEPRECATED: will be removed in a future release
     MOcppMongooseClient(struct mg_mgr *mgr, 
             const char *backend_url_factory = nullptr, 
             const char *charge_box_id_factory = nullptr,
@@ -82,14 +93,16 @@ public:
     //update WS configs. To apply the updates, call `reloadConfigs()` afterwards
     void setBackendUrl(const char *backend_url);
     void setChargeBoxId(const char *cb_id);
-    void setAuthKey(const char *auth_key);
+    void setAuthKey(const char *auth_key); //DEPRECATED: will be removed in a future release
+    void setAuthKey(const unsigned char *auth_key, size_t len); //set the auth key in bytes-encoded format
     void setCaCert(const char *ca_cert); //forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
 
     void reloadConfigs();
 
     const char *getBackendUrl() {return backend_url.c_str();}
     const char *getChargeBoxId() {return cb_id.c_str();}
-    const char *getAuthKey() {return auth_key.c_str();}
+    const char *getAuthKey() {return (const char*)auth_key;} //DEPRECATED: will be removed in a future release
+    int printAuthKey(unsigned char *buf, size_t size);
     const char *getCaCert() {return ca_cert ? ca_cert : "";}
 
     const char *getUrl() {return url.c_str();}

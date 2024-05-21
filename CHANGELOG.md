@@ -1,11 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [v1.1.0] - 2024-05-21
 
 ### Changed
 
 - Adopt `bool isConnected()` from `Connection` interface ([#7](https://github.com/matth-x/MicroOcppMongoose/pull/7))
 - Do not copy cert into heap memory ([#10](https://github.com/matth-x/MicroOcppMongoose/pull/10))
+- Migrate to base64-encoder in Mongoose ([#4](https://github.com/matth-x/MicroOcppMongoose/pull/4))
 
 ### Added
 
@@ -17,6 +18,10 @@
 
 - FTP moved into a new project [MicroFtp](https://github.com/matth-x/MicroFtp) ([#5](https://github.com/matth-x/MicroOcppMongoose/pull/5))
 - Custom config `Cst_CaCert` ([#10](https://github.com/matth-x/MicroOcppMongoose/pull/10))
+
+### Fixed
+
+- Encode AuthorizationKey in Hex ([#4](https://github.com/matth-x/MicroOcppMongoose/pull/4))
 
 ## [1.0.0] - 2023-10-20
 
