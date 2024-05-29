@@ -9,7 +9,19 @@
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
 
+#define MO_MG_V614 614
+#define MO_MG_V708 708
+#define MO_MG_V713 713
+
+#ifndef MO_MG_USE_VERSION
 #if defined(MO_MG_VERSION_614)
+#define MO_MG_USE_VERSION=MO_MG_V614
+#else
+#define MO_MG_V708
+#endif
+#endif
+
+#if MO_MG_USE_VERSION == MO_MG_V614
 #define MO_MG_F_IS_MOcppMongooseClient MG_F_USER_2
 #endif
 
@@ -19,7 +31,11 @@ bool validateAuthorizationKeyHex(const char *auth_key_hex);
 
 using namespace MicroOcpp;
 
+#if MO_MG_USE_VERSION <= MO_MG_V708
 void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
+#else
+void ws_cb(struct mg_connection *c, int ev, void *ev_data);
+#endif
 
 MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
             const char *backend_url_factory, 
@@ -75,10 +91,12 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
 
     reloadConfigs(); //load WS creds with configs values
 
-#if defined(MO_MG_VERSION_614)
+#if MO_MG_USE_VERSION == MO_MG_V614
     MO_DBG_DEBUG("use MG version %s (tested with 6.14)", MG_VERSION);
-#else
+#elif MO_MG_USE_VERSION == MO_MG_V708
     MO_DBG_DEBUG("use MG version %s (tested with 7.8)", MG_VERSION);
+#elif MO_MG_USE_VERSION == MO_MG_V713
+    MO_DBG_DEBUG("use MG version %s (tested with 7.13)", MG_VERSION);
 #endif
 
     maintainWsConn();
@@ -106,7 +124,7 @@ MOcppMongooseClient::~MOcppMongooseClient() {
     MO_DBG_DEBUG("destruct MOcppMongooseClient");
     if (websocket) {
         reconnect(); //close WS connection, won't be reopened
-#if defined(MO_MG_VERSION_614)
+#if MO_MG_USE_VERSION == MO_MG_V614
         websocket->flags &= ~MO_MG_F_IS_MOcppMongooseClient;
         websocket->user_data = nullptr;
 #else
@@ -124,7 +142,7 @@ bool MOcppMongooseClient::sendTXT(const char *msg, size_t length) {
         return false;
     }
     size_t sent;
-#if defined(MO_MG_VERSION_614)
+#if MO_MG_USE_VERSION == MO_MG_V614
     if (websocket->send_mbuf.len > 0) {
         sent = 0;
         return false;
@@ -167,7 +185,7 @@ void MOcppMongooseClient::maintainWsConn() {
     if (websocket && isConnectionOpen() &&
             ws_ping_interval_int && ws_ping_interval_int->getInt() > 0 && mocpp_tick_ms() - last_hb >= (ws_ping_interval_int->getInt() * 1000UL)) {
         last_hb = mocpp_tick_ms();
-#if defined(MO_MG_VERSION_614)
+#if MO_MG_USE_VERSION == MO_MG_V614
         mg_send_websocket_frame(websocket, WEBSOCKET_OP_PING, "", 0);
 #else
         mg_ws_send(websocket, "", 0, WEBSOCKET_OP_PING);
@@ -231,7 +249,11 @@ void MOcppMongooseClient::maintainWsConn() {
         }
 
         // mg_base64_encode() places a null terminator automatically, because the output is a c-string
+        #if MO_MG_USE_VERSION <= MO_MG_V708
         mg_base64_encode(token, len, base64);
+        #else
+        mg_base64_encode(token, len, base64, sizeof(base64));
+        #endif
         delete[] token;
 
         MO_DBG_DEBUG("auth64 len=%u, auth64 Token=%s", base64_length, base64);
@@ -244,7 +266,7 @@ void MOcppMongooseClient::maintainWsConn() {
         (void) 0;
     }
 
-#if defined(MO_MG_VERSION_614)
+#if MO_MG_USE_VERSION == MO_MG_V614
 
     struct mg_connect_opts opts;
     memset(&opts, 0, sizeof(opts));
@@ -305,7 +327,7 @@ void MOcppMongooseClient::reconnect() {
     if (!websocket) {
         return;
     }
-#if defined(MO_MG_VERSION_614)
+#if MO_MG_USE_VERSION == MO_MG_V614
     if (!connection_closing) {
         const char *msg = "socket closed by client";
         mg_send_websocket_frame(websocket, WEBSOCKET_OP_CLOSE, msg, strlen(msg));
@@ -455,7 +477,7 @@ unsigned long MOcppMongooseClient::getLastConnected() {
     return last_connection_established;
 }
 
-#if defined(MO_MG_VERSION_614)
+#if MO_MG_USE_VERSION == MO_MG_V614
 
 void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
 
@@ -517,7 +539,12 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
 
 #else
 
+#if MO_MG_USE_VERSION <= MO_MG_V708
 void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
+#else
+void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
+    void *fn_data = c->fn_data;
+#endif
     if (ev != 2) {
         MO_DBG_VERBOSE("Cb fn with event: %d\n", ev);
         (void)0;
@@ -548,8 +575,13 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
             }
             struct mg_tls_opts opts;
             memset(&opts, 0, sizeof(struct mg_tls_opts));
+            #if MO_MG_USE_VERSION <= MO_MG_V708
             opts.ca = ca_string;
             opts.srvname = mg_url_host(osock->getUrl());
+            #else
+            opts.ca = mg_str(ca_string);
+            opts.name = mg_url_host(osock->getUrl());
+            #endif
             mg_tls_init(c, &opts);
         } else {
             MO_DBG_WARN("Insecure connection (WS)");
