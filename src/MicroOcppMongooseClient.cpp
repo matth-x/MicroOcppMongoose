@@ -16,9 +16,9 @@
 
 #ifndef MO_MG_USE_VERSION
 #if defined(MO_MG_VERSION_614)
-#define MO_MG_USE_VERSION=MO_MG_V614
+#define MO_MG_USE_VERSION MO_MG_V614
 #else
-#define MO_MG_V708
+#define MO_MG_USE_VERSION MO_MG_V708
 #endif
 #endif
 
