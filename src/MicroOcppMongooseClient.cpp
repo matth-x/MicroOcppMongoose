@@ -12,6 +12,7 @@
 #define MO_MG_V614 614
 #define MO_MG_V708 708
 #define MO_MG_V713 713
+#define MO_MG_V714 714
 
 #ifndef MO_MG_USE_VERSION
 #if defined(MO_MG_VERSION_614)
@@ -413,8 +414,10 @@ void MOcppMongooseClient::reloadConfigs() {
 
         #if MO_MG_VERSION_614
         cs_from_hex((char*)auth_key, auth_key_hex, strlen(auth_key_hex));
-        #else
+        #elif MO_MG_USE_VERSION <= MO_MG_V713
         mg_unhex(auth_key_hex, strlen(auth_key_hex), auth_key);
+        #else
+        mg_str_to_num(mg_str(auth_key_hex), 16, auth_key, MO_AUTHKEY_LEN_MAX);
         #endif
 
         auth_key_len = strlen(setting_auth_key_hex_str->getString()) / 2;
@@ -593,7 +596,11 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
         osock->updateRcvTimer();
     } else if (ev == MG_EV_WS_MSG) {
         struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
+#if MO_MG_USE_VERSION <= MO_MG_V713
         if (!osock->getReceiveTXTcallback()((const char*) wm->data.ptr, wm->data.len)) {
+#else
+        if (!osock->getReceiveTXTcallback()((const char*) wm->data.buf, wm->data.len)) {
+#endif
             MO_DBG_WARN("processing input message failed");
         }
         osock->updateRcvTimer();
