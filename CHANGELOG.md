@@ -3,7 +3,10 @@
 ## Unreleased
 
 ### Added
-- Mongoose v7.13 support
+- Mongoose v7.13 support ([#11](https://github.com/matth-x/MicroOcppMongoose/pull/11)
+
+### Fixed
+- AuthorizationKey hex conversion ([#12](https://github.com/matth-x/MicroOcppMongoose/pull/12))
 
 ## [v1.1.0] - 2024-05-21
 
