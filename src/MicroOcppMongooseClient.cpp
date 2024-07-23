@@ -71,7 +71,7 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
     char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
     auth_key_hex[0] = '\0';
     if (auth_key_factory) {
-        for (size_t i = 0; i < auth_key_factory_len; i += 2) {
+        for (size_t i = 0; i < auth_key_factory_len; i++) {
             snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key_factory[i]);
         }
     }
@@ -380,7 +380,7 @@ void MOcppMongooseClient::setAuthKey(const unsigned char *auth_key, size_t len) 
 
     char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
     auth_key_hex[0] = '\0';
-    for (size_t i = 0; i < len; i += 2) {
+    for (size_t i = 0; i < len; i++) {
         snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key[i]);
     }
 
