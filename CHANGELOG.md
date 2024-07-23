@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Mongoose v7.13 support
+
 ## [v1.1.0] - 2024-05-21
 
 ### Changed
