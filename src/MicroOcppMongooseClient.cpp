@@ -6,6 +6,10 @@
 #include <MicroOcpp/Core/Configuration.h>
 #include <MicroOcpp/Debug.h>
 
+#if MO_ENABLE_V201
+#include <MicroOcpp/Model/Variables/VariableContainer.h>
+#endif
+
 #define DEBUG_MSG_INTERVAL 5000UL
 #define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
 
@@ -63,21 +67,34 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         MO_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MO_WSCONN_FN, readonly, true);
     setting_cb_id_str = declareConfiguration<const char*>(
         MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
-    
-    if (auth_key_factory_len > MO_AUTHKEY_LEN_MAX) {
-        MO_DBG_WARN("auth_key_factory too long - will be cropped");
-        auth_key_factory_len = MO_AUTHKEY_LEN_MAX;
-    }
-    char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
-    auth_key_hex[0] = '\0';
-    if (auth_key_factory) {
-        for (size_t i = 0; i < auth_key_factory_len; i++) {
-            snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key_factory[i]);
+
+#if MO_ENABLE_V201
+    if (protocolVersion.major == 2) {
+        websocketSettings = makeVariableContainerVolatile(MO_WSCONN_FN_V201, true);
+        auto variable = websocketSettings->createVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
+        variable->setComponentId("SecurityCtrlr");
+        variable->setName("BasicAuthPassword");
+        variable->setString(auth_key_factory ? (const char*)auth_key_factory : "");
+        websocketSettings->add(std::move(variable));
+        basicAuthPasswordString = websocketSettings->getVariable("SecurityCtrlr", "BasicAuthPassword");
+    } else
+#endif
+    {
+        if (auth_key_factory_len > MO_AUTHKEY_LEN_MAX) {
+            MO_DBG_WARN("auth_key_factory too long - will be cropped");
+            auth_key_factory_len = MO_AUTHKEY_LEN_MAX;
         }
+        char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
+        auth_key_hex[0] = '\0';
+        if (auth_key_factory) {
+            for (size_t i = 0; i < auth_key_factory_len; i++) {
+                snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key_factory[i]);
+            }
+        }
+        setting_auth_key_hex_str = declareConfiguration<const char*>(
+            "AuthorizationKey", auth_key_hex, MO_WSCONN_FN, readonly, true);
+        registerConfigurationValidator("AuthorizationKey", validateAuthorizationKeyHex);
     }
-    setting_auth_key_hex_str = declareConfiguration<const char*>(
-        "AuthorizationKey", auth_key_hex, MO_WSCONN_FN, readonly, true);
-    registerConfigurationValidator("AuthorizationKey", validateAuthorizationKeyHex);
 
     ws_ping_interval_int = declareConfiguration<int>(
         "WebSocketPingInterval", 5, MO_WSCONN_FN);
@@ -384,6 +401,11 @@ void MOcppMongooseClient::setAuthKey(const unsigned char *auth_key, size_t len) 
         snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key[i]);
     }
 
+#if MO_ENABLE_V201
+    if (protocolVersion.major == 2 && basicAuthPasswordString) {
+        basicAuthPasswordString->setString((const char*)auth_key);
+    } else
+#endif
     if (setting_auth_key_hex_str) {
         setting_auth_key_hex_str->setString(auth_key_hex);
         configuration_save();
@@ -409,6 +431,12 @@ void MOcppMongooseClient::reloadConfigs() {
         cb_id = setting_cb_id_str->getString();
     }
 
+#if MO_ENABLE_V201
+    if (protocolVersion.major == 2 && basicAuthPasswordString) {
+        snprintf((char*)auth_key, sizeof(auth_key), "%s", basicAuthPasswordString->getString());
+        auth_key_len = strlen((char*)auth_key);
+    } else
+#endif
     if (setting_auth_key_hex_str) {
         auto auth_key_hex = setting_auth_key_hex_str->getString();
 
@@ -479,6 +507,12 @@ unsigned long MOcppMongooseClient::getLastRecv() {
 unsigned long MOcppMongooseClient::getLastConnected() {
     return last_connection_established;
 }
+
+#if MO_ENABLE_V201
+std::shared_ptr<VariableContainer> MOcppMongooseClient::getVariableContainer() {
+    return websocketSettings;
+}
+#endif
 
 #if MO_MG_USE_VERSION == MO_MG_V614
 
