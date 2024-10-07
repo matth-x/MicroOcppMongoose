@@ -67,6 +67,11 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         MO_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MO_WSCONN_FN, readonly, true);
     setting_cb_id_str = declareConfiguration<const char*>(
         MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
+    
+    if (auth_key_factory_len > MO_AUTHKEY_LEN_MAX) {
+        MO_DBG_WARN("auth_key_factory too long - will be cropped");
+        auth_key_factory_len = MO_AUTHKEY_LEN_MAX;
+    }
 
 #if MO_ENABLE_V201
     if (protocolVersion.major == 2) {
@@ -74,16 +79,14 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         auto variable = websocketSettings->createVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
         variable->setComponentId("SecurityCtrlr");
         variable->setName("BasicAuthPassword");
-        variable->setString(auth_key_factory ? (const char*)auth_key_factory : "");
+        char basicAuthPassword [MO_AUTHKEY_LEN_MAX + 1];
+        snprintf(basicAuthPassword, sizeof(basicAuthPassword), "%.*s", (int)auth_key_factory_len, auth_key_factory ? (const char*)auth_key_factory : "");
+        variable->setString(basicAuthPassword);
         websocketSettings->add(std::move(variable));
         basicAuthPasswordString = websocketSettings->getVariable("SecurityCtrlr", "BasicAuthPassword");
     } else
 #endif
     {
-        if (auth_key_factory_len > MO_AUTHKEY_LEN_MAX) {
-            MO_DBG_WARN("auth_key_factory too long - will be cropped");
-            auth_key_factory_len = MO_AUTHKEY_LEN_MAX;
-        }
         char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
         auth_key_hex[0] = '\0';
         if (auth_key_factory) {
@@ -395,20 +398,26 @@ void MOcppMongooseClient::setAuthKey(const unsigned char *auth_key, size_t len) 
         return;
     }
 
-    char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
-    auth_key_hex[0] = '\0';
-    for (size_t i = 0; i < len; i++) {
-        snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key[i]);
-    }
 
 #if MO_ENABLE_V201
-    if (protocolVersion.major == 2 && basicAuthPasswordString) {
-        basicAuthPasswordString->setString((const char*)auth_key);
+    if (protocolVersion.major == 2) {
+        char basicAuthPassword [MO_AUTHKEY_LEN_MAX + 1];
+        snprintf(basicAuthPassword, sizeof(basicAuthPassword), "%.*s", (int)len, auth_key ? (const char*)auth_key : "");
+        if (basicAuthPasswordString) {
+            basicAuthPasswordString->setString(basicAuthPassword);
+        }
     } else
 #endif
-    if (setting_auth_key_hex_str) {
-        setting_auth_key_hex_str->setString(auth_key_hex);
-        configuration_save();
+    {
+        char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
+        auth_key_hex[0] = '\0';
+        for (size_t i = 0; i < len; i++) {
+            snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key[i]);
+        }
+        if (setting_auth_key_hex_str) {
+            setting_auth_key_hex_str->setString(auth_key_hex);
+            configuration_save();
+        }
     }
 }
 
@@ -432,24 +441,28 @@ void MOcppMongooseClient::reloadConfigs() {
     }
 
 #if MO_ENABLE_V201
-    if (protocolVersion.major == 2 && basicAuthPasswordString) {
-        snprintf((char*)auth_key, sizeof(auth_key), "%s", basicAuthPasswordString->getString());
-        auth_key_len = strlen((char*)auth_key);
+    if (protocolVersion.major == 2) {
+        if (basicAuthPasswordString) {
+            snprintf((char*)auth_key, sizeof(auth_key), "%s", basicAuthPasswordString->getString());
+            auth_key_len = strlen((char*)auth_key);
+        }
     } else
 #endif
-    if (setting_auth_key_hex_str) {
-        auto auth_key_hex = setting_auth_key_hex_str->getString();
+    {
+        if (setting_auth_key_hex_str) {
+            auto auth_key_hex = setting_auth_key_hex_str->getString();
 
-        #if MO_MG_VERSION_614
-        cs_from_hex((char*)auth_key, auth_key_hex, strlen(auth_key_hex));
-        #elif MO_MG_USE_VERSION <= MO_MG_V713
-        mg_unhex(auth_key_hex, strlen(auth_key_hex), auth_key);
-        #else
-        mg_str_to_num(mg_str(auth_key_hex), 16, auth_key, MO_AUTHKEY_LEN_MAX);
-        #endif
+            #if MO_MG_VERSION_614
+            cs_from_hex((char*)auth_key, auth_key_hex, strlen(auth_key_hex));
+            #elif MO_MG_USE_VERSION <= MO_MG_V713
+            mg_unhex(auth_key_hex, strlen(auth_key_hex), auth_key);
+            #else
+            mg_str_to_num(mg_str(auth_key_hex), 16, auth_key, MO_AUTHKEY_LEN_MAX);
+            #endif
 
-        auth_key_len = strlen(setting_auth_key_hex_str->getString()) / 2;
-        auth_key[auth_key_len] = '\0'; //need null-termination as long as deprecated `const char *getAuthKey()` exists
+            auth_key_len = strlen(setting_auth_key_hex_str->getString()) / 2;
+            auth_key[auth_key_len] = '\0'; //need null-termination as long as deprecated `const char *getAuthKey()` exists
+        }
     }
 
     /*
