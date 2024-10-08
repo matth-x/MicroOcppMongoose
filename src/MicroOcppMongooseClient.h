@@ -19,14 +19,24 @@
 
 #ifndef MO_WSCONN_FN
 #define MO_WSCONN_FN (MO_FILENAME_PREFIX "ws-conn.jsn")
+#define MO_WSCONN_FN_V201 (MO_FILENAME_PREFIX "ws-conn-v201.jsn")
 #endif
 
+#if MO_ENABLE_V201
+#define MO_AUTHKEY_LEN_MAX 40 //BasicAuthPassword length
+#else
 #define MO_AUTHKEY_LEN_MAX 20 //AuthKey in Bytes. Hex value has double length
+#endif
 
 namespace MicroOcpp {
 
 class FilesystemAdapter;
 class Configuration;
+
+#if MO_ENABLE_V201
+class Variable;
+class VariableContainer;
+#endif
 
 class MOcppMongooseClient : public MicroOcpp::Connection {
 private:
@@ -35,7 +45,7 @@ private:
     std::string backend_url;
     std::string cb_id;
     std::string url; //url = backend_url + '/' + cb_id
-    unsigned char auth_key [MO_AUTHKEY_LEN_MAX + 1]; //AuthKey in bytes encoding ("FF01" = {0xFF, 0x01})
+    unsigned char auth_key [MO_AUTHKEY_LEN_MAX + 1]; //OCPP 2.0.1: BasicAuthPassword. OCPP 1.6: AuthKey in bytes encoding ("FF01" = {0xFF, 0x01}). Both versions append a terminating '\0'
     size_t auth_key_len;
     const char *ca_cert; //zero-copy. The host system must ensure that this pointer remains valid during the lifetime of this class
     std::shared_ptr<Configuration> setting_backend_url_str;
@@ -47,6 +57,10 @@ private:
     std::shared_ptr<Configuration> stale_timeout_int; //inactivity period after which the connection will be closed
     std::shared_ptr<Configuration> ws_ping_interval_int; //heartbeat intervall in s. 0 sets hb off
     unsigned long last_hb {0};
+#if MO_ENABLE_V201
+    std::shared_ptr<VariableContainer> websocketSettings;
+    Variable *basicAuthPasswordString = nullptr;
+#endif
     bool connection_established {false};
     unsigned long last_connection_established {-1UL / 2UL};
     bool connection_closing {false};
@@ -115,6 +129,12 @@ public:
     void updateRcvTimer();
     unsigned long getLastRecv(); //get time of last successful receive in millis
     unsigned long getLastConnected(); //get time of last connection establish
+
+#if MO_ENABLE_V201
+    //WS client creates and manages its own Variables. This getter function is a temporary solution, in future
+    //the WS client will be initialized with a Context reference for registering the Variables directly
+    std::shared_ptr<VariableContainer> getVariableContainer();
+#endif
 };
 
 }
