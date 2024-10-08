@@ -17,6 +17,7 @@
 #define MO_MG_V708 708
 #define MO_MG_V713 713
 #define MO_MG_V714 714
+#define MO_MG_V715 715
 
 #ifndef MO_MG_USE_VERSION
 #if defined(MO_MG_VERSION_614)
