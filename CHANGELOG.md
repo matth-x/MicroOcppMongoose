@@ -3,7 +3,8 @@
 ## Unreleased
 
 ### Added
-- Mongoose v7.13 support ([#11](https://github.com/matth-x/MicroOcppMongoose/pull/11)
+- Mongoose v7.13 support ([#11](https://github.com/matth-x/MicroOcppMongoose/pull/11))
+- OCPP 2.0.1 BasicAuthPassword integration ([#13](https://github.com/matth-x/MicroOcppMongoose/pull/13))
 
 ### Fixed
 - AuthorizationKey hex conversion ([#12](https://github.com/matth-x/MicroOcppMongoose/pull/12))
