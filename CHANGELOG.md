@@ -7,7 +7,7 @@
 - OCPP 2.0.1 BasicAuthPassword integration ([#13](https://github.com/matth-x/MicroOcppMongoose/pull/13))
 
 ### Fixed
-- AuthorizationKey hex conversion ([#12](https://github.com/matth-x/MicroOcppMongoose/pull/12))
+- AuthorizationKey hex conversion ([#12](https://github.com/matth-x/MicroOcppMongoose/pull/12), [#15](https://github.com/matth-x/MicroOcppMongoose/pull/15))
 
 ## [v1.1.0] - 2024-05-21
 

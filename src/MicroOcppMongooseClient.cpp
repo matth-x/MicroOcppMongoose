@@ -274,7 +274,7 @@ void MOcppMongooseClient::maintainWsConn() {
         #if MO_MG_USE_VERSION <= MO_MG_V708
         mg_base64_encode(token, len, base64);
         #else
-        mg_base64_encode(token, len, base64, sizeof(base64));
+        mg_base64_encode(token, len, base64, base64_length + 1);
         #endif
         delete[] token;
 
@@ -452,16 +452,24 @@ void MOcppMongooseClient::reloadConfigs() {
     {
         if (setting_auth_key_hex_str) {
             auto auth_key_hex = setting_auth_key_hex_str->getString();
+            auto auth_key_hex_len = strlen(setting_auth_key_hex_str->getString());
+            if (!validateAuthorizationKeyHex(auth_key_hex)) {
+                MO_DBG_ERR("AuthorizationKey stored with format error. Disable Basic Auth");
+                auth_key_hex_len = 0;
+            }
+
+            auth_key_len = auth_key_hex_len / 2;
 
             #if MO_MG_VERSION_614
-            cs_from_hex((char*)auth_key, auth_key_hex, strlen(auth_key_hex));
+            cs_from_hex((char*)auth_key, auth_key_hex, auth_key_hex_len);
             #elif MO_MG_USE_VERSION <= MO_MG_V713
-            mg_unhex(auth_key_hex, strlen(auth_key_hex), auth_key);
+            mg_unhex(auth_key_hex, auth_key_hex_len, auth_key);
             #else
-            mg_str_to_num(mg_str(auth_key_hex), 16, auth_key, MO_AUTHKEY_LEN_MAX);
+            for (size_t i = 0; i < auth_key_len; i++) {
+                mg_str_to_num(mg_str_n(auth_key_hex + 2*i, 2), 16, auth_key + i, sizeof(uint8_t));
+            }
             #endif
 
-            auth_key_len = strlen(setting_auth_key_hex_str->getString()) / 2;
             auth_key[auth_key_len] = '\0'; //need null-termination as long as deprecated `const char *getAuthKey()` exists
         }
     }
