@@ -76,15 +76,18 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
 
 #if MO_ENABLE_V201
     if (protocolVersion.major == 2) {
-        websocketSettings = makeVariableContainerVolatile(MO_WSCONN_FN_V201, true);
-        auto variable = websocketSettings->createVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
+        websocketSettings = std::unique_ptr<VariableContainerOwning>(new VariableContainerOwning());
+        if (filesystem) {
+            websocketSettings->enablePersistency(filesystem, MO_WSCONN_FN_V201);
+        }
+        auto variable = makeVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
         variable->setComponentId("SecurityCtrlr");
         variable->setName("BasicAuthPassword");
         char basicAuthPassword [MO_AUTHKEY_LEN_MAX + 1];
         snprintf(basicAuthPassword, sizeof(basicAuthPassword), "%.*s", (int)auth_key_factory_len, auth_key_factory ? (const char*)auth_key_factory : "");
         variable->setString(basicAuthPassword);
+        basicAuthPasswordString = variable.get();
         websocketSettings->add(std::move(variable));
-        basicAuthPasswordString = websocketSettings->getVariable("SecurityCtrlr", "BasicAuthPassword");
     } else
 #endif
     {
@@ -531,8 +534,8 @@ unsigned long MOcppMongooseClient::getLastConnected() {
 }
 
 #if MO_ENABLE_V201
-std::shared_ptr<VariableContainer> MOcppMongooseClient::getVariableContainer() {
-    return websocketSettings;
+VariableContainer *MOcppMongooseClient::getVariableContainer() {
+    return websocketSettings.get();
 }
 #endif
 
