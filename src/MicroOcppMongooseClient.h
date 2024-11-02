@@ -36,6 +36,7 @@ class Configuration;
 #if MO_ENABLE_V201
 class Variable;
 class VariableContainer;
+class VariableContainerOwning;
 #endif
 
 class MOcppMongooseClient : public MicroOcpp::Connection {
@@ -58,8 +59,10 @@ private:
     std::shared_ptr<Configuration> ws_ping_interval_int; //heartbeat intervall in s. 0 sets hb off
     unsigned long last_hb {0};
 #if MO_ENABLE_V201
-    std::shared_ptr<VariableContainer> websocketSettings;
-    Variable *basicAuthPasswordString = nullptr;
+    std::unique_ptr<VariableContainerOwning> websocketSettings;
+    Variable *v201csmsUrlString = nullptr;
+    Variable *v201identityString = nullptr;
+    Variable *v201basicAuthPasswordString = nullptr;
 #endif
     bool connection_established {false};
     unsigned long last_connection_established {-1UL / 2UL};
@@ -133,7 +136,7 @@ public:
 #if MO_ENABLE_V201
     //WS client creates and manages its own Variables. This getter function is a temporary solution, in future
     //the WS client will be initialized with a Context reference for registering the Variables directly
-    std::shared_ptr<VariableContainer> getVariableContainer();
+    VariableContainer *getVariableContainer();
 #endif
 };
 
