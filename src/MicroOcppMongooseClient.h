@@ -60,7 +60,9 @@ private:
     unsigned long last_hb {0};
 #if MO_ENABLE_V201
     std::unique_ptr<VariableContainerOwning> websocketSettings;
-    Variable *basicAuthPasswordString = nullptr;
+    Variable *v201csmsUrlString = nullptr;
+    Variable *v201identityString = nullptr;
+    Variable *v201basicAuthPasswordString = nullptr;
 #endif
     bool connection_established {false};
     unsigned long last_connection_established {-1UL / 2UL};

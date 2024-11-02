@@ -64,11 +64,6 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         readonly = true;
     }
 
-    setting_backend_url_str = declareConfiguration<const char*>(
-        MO_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MO_WSCONN_FN, readonly, true);
-    setting_cb_id_str = declareConfiguration<const char*>(
-        MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
-    
     if (auth_key_factory_len > MO_AUTHKEY_LEN_MAX) {
         MO_DBG_WARN("auth_key_factory too long - will be cropped");
         auth_key_factory_len = MO_AUTHKEY_LEN_MAX;
@@ -80,17 +75,42 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         if (filesystem) {
             websocketSettings->enablePersistency(filesystem, MO_WSCONN_FN_V201);
         }
-        auto variable = makeVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
-        variable->setComponentId("SecurityCtrlr");
-        variable->setName("BasicAuthPassword");
-        char basicAuthPassword [MO_AUTHKEY_LEN_MAX + 1];
-        snprintf(basicAuthPassword, sizeof(basicAuthPassword), "%.*s", (int)auth_key_factory_len, auth_key_factory ? (const char*)auth_key_factory : "");
-        variable->setString(basicAuthPassword);
-        basicAuthPasswordString = variable.get();
-        websocketSettings->add(std::move(variable));
+
+        auto csmsUrl = makeVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
+        csmsUrl->setComponentId("SecurityCtrlr");
+        csmsUrl->setName("CsmsUrl");
+        csmsUrl->setString(backend_url_factory ? backend_url_factory : "");
+        csmsUrl->setPersistent();
+        v201csmsUrlString = csmsUrl.get();
+        websocketSettings->add(std::move(csmsUrl));
+
+        auto identity = makeVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
+        identity->setComponentId("SecurityCtrlr");
+        identity->setName("Identity");
+        identity->setString(charge_box_id_factory ? charge_box_id_factory : "");
+        identity->setPersistent();
+        v201identityString = identity.get();
+        websocketSettings->add(std::move(identity));
+
+        auto basicAuthPassword = makeVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
+        basicAuthPassword->setComponentId("SecurityCtrlr");
+        basicAuthPassword->setName("BasicAuthPassword");
+        char basicAuthPasswordVal [MO_AUTHKEY_LEN_MAX + 1];
+        snprintf(basicAuthPasswordVal, sizeof(basicAuthPasswordVal), "%.*s", (int)auth_key_factory_len, auth_key_factory ? (const char*)auth_key_factory : "");
+        basicAuthPassword->setString(basicAuthPasswordVal);
+        basicAuthPassword->setPersistent();
+        v201basicAuthPasswordString = basicAuthPassword.get();
+        websocketSettings->add(std::move(basicAuthPassword));
+
+        websocketSettings->load(); //if settings on flash already exist, this overwrites factory defaults
     } else
 #endif
     {
+        setting_backend_url_str = declareConfiguration<const char*>(
+            MO_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MO_WSCONN_FN, readonly, true);
+        setting_cb_id_str = declareConfiguration<const char*>(
+            MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
+
         char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
         auth_key_hex[0] = '\0';
         if (auth_key_factory) {
@@ -369,10 +389,21 @@ void MOcppMongooseClient::setBackendUrl(const char *backend_url_cstr) {
         return;
     }
 
-    if (setting_backend_url_str) {
-        setting_backend_url_str->setString(backend_url_cstr);
-        configuration_save();
+#if MO_ENABLE_V201
+    if (protocolVersion.major == 2) {
+        if (v201csmsUrlString) {
+            v201csmsUrlString->setString(backend_url_cstr);
+            websocketSettings->commit();
+        }
+    } else
+#endif
+    {
+        if (setting_backend_url_str) {
+            setting_backend_url_str->setString(backend_url_cstr);
+            configuration_save();
+        }
     }
+
 }
 
 void MOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
@@ -381,10 +412,21 @@ void MOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
         return;
     }
 
-    if (setting_cb_id_str) {
-        setting_cb_id_str->setString(cb_id_cstr);
-        configuration_save();
+#if MO_ENABLE_V201
+    if (protocolVersion.major == 2) {
+        if (v201identityString) {
+            v201identityString->setString(cb_id_cstr);
+            websocketSettings->commit();
+        }
+    } else
+#endif
+    {
+        if (setting_cb_id_str) {
+            setting_cb_id_str->setString(cb_id_cstr);
+            configuration_save();
+        }
     }
+
 }
 
 void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
@@ -407,8 +449,8 @@ void MOcppMongooseClient::setAuthKey(const unsigned char *auth_key, size_t len) 
     if (protocolVersion.major == 2) {
         char basicAuthPassword [MO_AUTHKEY_LEN_MAX + 1];
         snprintf(basicAuthPassword, sizeof(basicAuthPassword), "%.*s", (int)len, auth_key ? (const char*)auth_key : "");
-        if (basicAuthPasswordString) {
-            basicAuthPasswordString->setString(basicAuthPassword);
+        if (v201basicAuthPasswordString) {
+            v201basicAuthPasswordString->setString(basicAuthPassword);
         }
     } else
 #endif
@@ -436,23 +478,32 @@ void MOcppMongooseClient::reloadConfigs() {
     /*
      * reload WS credentials from configs
      */
-    if (setting_backend_url_str) {
-        backend_url = setting_backend_url_str->getString();
-    }
-
-    if (setting_cb_id_str) {
-        cb_id = setting_cb_id_str->getString();
-    }
 
 #if MO_ENABLE_V201
     if (protocolVersion.major == 2) {
-        if (basicAuthPasswordString) {
-            snprintf((char*)auth_key, sizeof(auth_key), "%s", basicAuthPasswordString->getString());
+        if (v201csmsUrlString) {
+            backend_url = v201csmsUrlString->getString();
+        }
+
+        if (v201identityString) {
+            cb_id = v201identityString->getString();
+        }
+
+        if (v201basicAuthPasswordString) {
+            snprintf((char*)auth_key, sizeof(auth_key), "%s", v201basicAuthPasswordString->getString());
             auth_key_len = strlen((char*)auth_key);
         }
     } else
 #endif
     {
+        if (setting_backend_url_str) {
+            backend_url = setting_backend_url_str->getString();
+        }
+
+        if (setting_cb_id_str) {
+            cb_id = setting_cb_id_str->getString();
+        }
+
         if (setting_auth_key_hex_str) {
             auto auth_key_hex = setting_auth_key_hex_str->getString();
             auto auth_key_hex_len = strlen(setting_auth_key_hex_str->getString());
