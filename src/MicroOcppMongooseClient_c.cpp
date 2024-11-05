@@ -15,7 +15,8 @@ OCPP_Connection *ocpp_makeConnection(struct mg_mgr *mgr,
         const char *charge_box_id_default,
         const char *auth_key_default,
         const char *CA_cert_default,
-        OCPP_FilesystemOpt fsopt) {
+        OCPP_FilesystemOpt fsopt,
+        bool ocpp201) {
     
     std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem;
     
@@ -28,7 +29,10 @@ OCPP_Connection *ocpp_makeConnection(struct mg_mgr *mgr,
             charge_box_id_default,
             auth_key_default,
             CA_cert_default,
-            filesystem);
+            filesystem,
+            ocpp201 ?
+                ProtocolVersion(2,0,1) :
+                ProtocolVersion(1,6));
     
     return reinterpret_cast<OCPP_Connection*>(sock);;
 }
