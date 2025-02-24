@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Mongoose v7.17 support ([#18](https://github.com/matth-x/MicroOcppMongoose/pull/18))
+
 ## [v1.2.0] - 2024-11-03
 
 ### Added
