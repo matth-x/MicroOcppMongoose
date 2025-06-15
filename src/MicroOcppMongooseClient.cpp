@@ -2,16 +2,16 @@
 // Copyright Matthias Akstaller 2019 - 2024
 // GPL-3.0 License (see LICENSE)
 
-#include "MicroOcppMongooseClient.h"
-#include <MicroOcpp/Core/Configuration.h>
+#include <MicroOcppMongooseClient.h>
+
+#include <MicroOcpp/Core/Memory.h>
+#include <MicroOcpp/Core/FilesystemAdapter.h>
+#include <MicroOcpp/Model/Configuration/ConfigurationService.h>
+#include <MicroOcpp/Model/Variables/VariableService.h>
 #include <MicroOcpp/Debug.h>
 
-#if MO_ENABLE_V201
-#include <MicroOcpp/Model/Variables/VariableContainer.h>
-#endif
-
-#define DEBUG_MSG_INTERVAL 5000UL
-#define WS_UNRESPONSIVE_THRESHOLD_MS 15000UL
+#define DEBUG_MSG_INTERVAL_S 5
+#define WS_UNRESPONSIVE_THRESHOLD_S 15
 
 #define MO_MG_V614 614
 #define MO_MG_V708 708
@@ -31,37 +31,120 @@
 #define MO_MG_F_IS_MOcppMongooseClient MG_F_USER_2
 #endif
 
-namespace MicroOcpp {
-bool validateAuthorizationKeyHex(const char *auth_key_hex);
+#define MO_MG_WSADAPTER_MEMTAG "MicroOcppMongooseClient.cpp"
+
+struct MOcppMongooseClient : public MicroOcpp::Connection, public MicroOcpp::MemoryManaged {
+    struct mg_mgr *mgr = nullptr;
+    struct mg_connection *websocket = nullptr;
+    MicroOcpp::Clock *clock = nullptr;
+    MicroOcpp::String backend_url;
+    MicroOcpp::String cb_id;
+    MicroOcpp::String url; //url = backend_url + '/' + cb_id
+    unsigned char auth_key [MO_AUTHKEY_LEN_MAX + 1]; //OCPP 2.0.1: BasicAuthPassword. OCPP 1.6: AuthKey in bytes encoding ("FF01" = {0xFF, 0x01}). Both versions append a terminating '\0'
+    size_t auth_key_len;
+    const char *ca_cert; //zero-copy. The host system must ensure that this pointer remains valid during the lifetime of this class
+
+#if MO_ENABLE_V16
+    MicroOcpp::Ocpp16::ConfigurationService *configService = nullptr;
+    std::unique_ptr<MicroOcpp::Ocpp16::ConfigurationContainerOwning> urlConfigs;
+    MicroOcpp::Ocpp16::Configuration *setting_backend_url_str = nullptr;
+    MicroOcpp::Ocpp16::Configuration *setting_cb_id_str = nullptr;
+    MicroOcpp::Ocpp16::Configuration *setting_auth_key_hex_str = nullptr;
+    MicroOcpp::Ocpp16::Configuration *reconnect_interval_int = nullptr; //minimum time between two connect trials in s
+    MicroOcpp::Ocpp16::Configuration *stale_timeout_int = nullptr; //inactivity period after which the connection will be closed
+    MicroOcpp::Ocpp16::Configuration *ws_ping_interval_int = nullptr; //heartbeat intervall in s. 0 sets hb off
+#endif //MO_ENABLE_V16
+#if MO_ENABLE_V201
+    MicroOcpp::Ocpp201::VariableService *varService = nullptr;
+    std::unique_ptr<MicroOcpp::Ocpp201::VariableContainerOwning> urlVariables;
+    MicroOcpp::Ocpp201::Variable *v201csmsUrlString = nullptr;
+    MicroOcpp::Ocpp201::Variable *v201identityString = nullptr;
+    MicroOcpp::Ocpp201::Variable *v201basicAuthPasswordString = nullptr;
+    MicroOcpp::Ocpp201::Variable *v201retryBackOffWaitMinimumInt = nullptr;
+    MicroOcpp::Ocpp201::Variable *v201staleTimeoutInt = nullptr;
+    MicroOcpp::Ocpp201::Variable *v201webSocketPingIntervalInt = nullptr;
+#endif //MO_ENABLE_V201
+
+    int32_t last_status_dbg_msg {0}, last_recv {0};
+    int32_t last_reconnection_attempt = -1;
+    int32_t last_hb {0};
+
+    bool connection_established {false};
+    int32_t last_connection_established {-1};
+    bool connection_closing {false};
+
+    int ocppVersion = -1;
+
+    void reconnect();
+
+    void maintainWsConn();
+
+    MOcppMongooseClient();
+
+    ~MOcppMongooseClient();
+
+    bool setupConnection(MicroOcpp::Context *context,
+        MO_FilesystemAdapter *filesystem,
+        struct mg_mgr *mgr, 
+        const char *backend_url_factory, 
+        const char *charge_box_id_factory,
+        const unsigned char *auth_key_factory, size_t auth_key_factory_len,
+        const char *ca_cert = nullptr); //zero-copy, the string must outlive this class and mg_mgr. Forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
+
+    void loop() override;
+
+    bool sendTXT(const char *msg, size_t length) override;
+
+    void reloadUrl();
+
+    const char *getAuthKey() {return (const char*)auth_key;} //DEPRECATED: will be removed in a future release
+    int printAuthKey(unsigned char *buf, size_t size);
+
+    void setConnectionOpen(bool open);
+    bool isConnectionOpen() {return connection_established && !connection_closing;}
+    bool isConnected() override {return isConnectionOpen();}
+    void cleanConnection();
+
+    void updateRcvTimer();
+
+    static bool validateAuthorizationKeyHex(const char *auth_key_hex, void *userData = nullptr);
+
+    #if MO_MG_USE_VERSION <= MO_MG_V708
+    static void mongoose_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
+    #else
+    static void mongoose_cb(struct mg_connection *c, int ev, void *ev_data);
+    #endif
+};
+
+MOcppMongooseClient::MOcppMongooseClient() :
+        MicroOcpp::MemoryManaged(MO_MG_WSADAPTER_MEMTAG),
+        backend_url(MicroOcpp::makeString(getMemoryTag())),
+        cb_id(MicroOcpp::makeString(getMemoryTag())),
+        url(MicroOcpp::makeString(getMemoryTag())) {
+
 }
 
-using namespace MicroOcpp;
-
-#if MO_MG_USE_VERSION <= MO_MG_V708
-void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data);
-#else
-void ws_cb(struct mg_connection *c, int ev, void *ev_data);
-#endif
-
-MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
+bool MOcppMongooseClient::setupConnection(
+            MicroOcpp::Context *context,
+            MO_FilesystemAdapter *filesystem,
+            struct mg_mgr *mgr,
             const char *backend_url_factory, 
             const char *charge_box_id_factory,
-            unsigned char *auth_key_factory, size_t auth_key_factory_len,
-            const char *ca_certificate,
-            std::shared_ptr<FilesystemAdapter> filesystem,
-            ProtocolVersion protocolVersion) : mgr(mgr), protocolVersion(protocolVersion) {
+            const unsigned char *auth_key_factory, size_t auth_key_factory_len,
+            const char *ca_certificate) {
     
-    bool readonly;
-    
-    if (filesystem) {
-        configuration_init(filesystem);
+    this->mgr = mgr;
+    this->clock = &context->getClock();
 
-        //all credentials are persistent over reboots
-        readonly = false;
-    } else {
-        //make the credentials non-persistent
-        MO_DBG_WARN("Credentials non-persistent. Use MicroOcpp::makeDefaultFilesystemAdapter(...) for persistency");
-        readonly = true;
+    ocppVersion = context->getOcppVersion();
+    if (ocppVersion < 0) {
+        MO_DBG_ERR("Protocol negotiation not supported. Need to call `mo_setOcppVersion()` before");
+        return false;
+    }
+
+    if (ocppVersion != MO_OCPP_V16 && ocppVersion != MO_OCPP_V201) {
+        MO_DBG_ERR("Unsupported OCPP version: %i", ocppVersion);
+        return false;
     }
 
     if (auth_key_factory_len > MO_AUTHKEY_LEN_MAX) {
@@ -69,72 +152,220 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
         auth_key_factory_len = MO_AUTHKEY_LEN_MAX;
     }
 
-#if MO_ENABLE_V201
-    if (protocolVersion.major == 2) {
-        websocketSettings = std::unique_ptr<VariableContainerOwning>(new VariableContainerOwning());
-        if (filesystem) {
-            websocketSettings->enablePersistency(filesystem, MO_WSCONN_FN_V201);
-        }
+    #if MO_ENABLE_V16
+    if (ocppVersion == MO_OCPP_V16) {
 
-        auto csmsUrl = makeVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
-        csmsUrl->setComponentId("SecurityCtrlr");
-        csmsUrl->setName("CsmsUrl");
-        csmsUrl->setString(backend_url_factory ? backend_url_factory : "");
-        csmsUrl->setPersistent();
-        v201csmsUrlString = csmsUrl.get();
-        websocketSettings->add(std::move(csmsUrl));
+    }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (ocppVersion == MO_OCPP_V201) {
+        
+    }
+    #endif //MO_ENABLE_V201
 
-        auto identity = makeVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
-        identity->setComponentId("SecurityCtrlr");
-        identity->setName("Identity");
-        identity->setString(charge_box_id_factory ? charge_box_id_factory : "");
-        identity->setPersistent();
-        v201identityString = identity.get();
-        websocketSettings->add(std::move(identity));
-
-        auto basicAuthPassword = makeVariable(Variable::InternalDataType::String, Variable::AttributeType::Actual);
-        basicAuthPassword->setComponentId("SecurityCtrlr");
-        basicAuthPassword->setName("BasicAuthPassword");
-        char basicAuthPasswordVal [MO_AUTHKEY_LEN_MAX + 1];
-        snprintf(basicAuthPasswordVal, sizeof(basicAuthPasswordVal), "%.*s", (int)auth_key_factory_len, auth_key_factory ? (const char*)auth_key_factory : "");
-        basicAuthPassword->setString(basicAuthPasswordVal);
-        basicAuthPassword->setPersistent();
-        v201basicAuthPasswordString = basicAuthPassword.get();
-        websocketSettings->add(std::move(basicAuthPassword));
-
-        websocketSettings->load(); //if settings on flash already exist, this overwrites factory defaults
-    } else
-#endif
-    {
-        setting_backend_url_str = declareConfiguration<const char*>(
-            MO_CONFIG_EXT_PREFIX "BackendUrl", backend_url_factory, MO_WSCONN_FN, readonly, true);
-        setting_cb_id_str = declareConfiguration<const char*>(
-            MO_CONFIG_EXT_PREFIX "ChargeBoxId", charge_box_id_factory, MO_WSCONN_FN, readonly, true);
-
-        char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
-        auth_key_hex[0] = '\0';
-        if (auth_key_factory) {
-            for (size_t i = 0; i < auth_key_factory_len; i++) {
-                snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key_factory[i]);
-            }
-        }
-        setting_auth_key_hex_str = declareConfiguration<const char*>(
-            "AuthorizationKey", auth_key_hex, MO_WSCONN_FN, readonly, true);
-        registerConfigurationValidator("AuthorizationKey", validateAuthorizationKeyHex);
+    MicroOcpp::Mutability mutability;
+    if (filesystem) {
+        mutability = MicroOcpp::Mutability::ReadWrite;
+    } else {
+        mutability = MicroOcpp::Mutability::ReadOnly;
     }
 
-    ws_ping_interval_int = declareConfiguration<int>(
-        "WebSocketPingInterval", 5, MO_WSCONN_FN);
-    reconnect_interval_int = declareConfiguration<int>(
-        MO_CONFIG_EXT_PREFIX "ReconnectInterval", 10, MO_WSCONN_FN);
-    stale_timeout_int = declareConfiguration<int>(
-        MO_CONFIG_EXT_PREFIX "StaleTimeout", 300, MO_WSCONN_FN);
+    #if MO_ENABLE_V16
+    if (ocppVersion == MO_OCPP_V16) {
+        configService = context->getModel16().getConfigurationService();
+        if (!configService) {
+            MO_DBG_ERR("setup failure");
+            return false;
+        }
 
-    configuration_load(MO_WSCONN_FN); //load configs with values stored on flash
+        urlConfigs = std::unique_ptr<MicroOcpp::Ocpp16::ConfigurationContainerOwning>(new MicroOcpp::Ocpp16::ConfigurationContainerOwning());
+        if (!urlConfigs) {
+            MO_DBG_ERR("OOM");
+            return false;
+        }
+        if (filesystem) {
+            urlConfigs->setFilesystem(filesystem);
+        }
+        urlConfigs->setFilename(MO_WSCONN_FN);
+
+        setting_backend_url_str = configService->getConfiguration(MO_CONFIG_EXT_PREFIX "BackendUrl");
+        if (!setting_backend_url_str) {
+            auto config = MicroOcpp::Ocpp16::makeConfiguration(MicroOcpp::Ocpp16::Configuration::Type::String);
+            if (!config) {
+                MO_DBG_ERR("OOM");
+                return false;
+            }
+            config->setKey(MO_CONFIG_EXT_PREFIX "BackendUrl");
+            config->setString(backend_url_factory ? backend_url_factory : "");
+            config->setMutability(mutability);
+            config->setRebootRequired();
+            setting_backend_url_str = config.get();
+            urlConfigs->add(std::move(config));
+        }
+
+        setting_cb_id_str = configService->getConfiguration(MO_CONFIG_EXT_PREFIX "ChargeBoxId");
+        if (!setting_cb_id_str) {
+            auto config = MicroOcpp::Ocpp16::makeConfiguration(MicroOcpp::Ocpp16::Configuration::Type::String);
+            if (!config) {
+                MO_DBG_ERR("OOM");
+                return false;
+            }
+            config->setKey(MO_CONFIG_EXT_PREFIX "ChargeBoxId");
+            config->setString(charge_box_id_factory ? charge_box_id_factory : "");
+            config->setMutability(mutability);
+            config->setRebootRequired();
+            setting_cb_id_str = config.get();
+            urlConfigs->add(std::move(config));
+        }
+
+        setting_auth_key_hex_str = configService->getConfiguration("AuthorizationKey");
+        if (!setting_auth_key_hex_str) {
+            auto config = MicroOcpp::Ocpp16::makeConfiguration(MicroOcpp::Ocpp16::Configuration::Type::String);
+            if (!config) {
+                MO_DBG_ERR("OOM");
+                return false;
+            }
+            config->setKey("AuthorizationKey");
+            char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
+            auth_key_hex[0] = '\0';
+            if (auth_key_factory) {
+                for (size_t i = 0; i < auth_key_factory_len; i++) {
+                    snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key_factory[i]);
+                }
+            }
+            config->setString(auth_key_hex);
+            config->setMutability(mutability);
+            config->setRebootRequired();
+            setting_auth_key_hex_str = config.get();
+            urlConfigs->add(std::move(config));
+        }
+
+        if (urlConfigs->size() > 0) {
+            urlConfigs->load(); //if settings on flash already exist, this overwrites factory defaults
+            configService->addContainer(urlConfigs.get());
+        } else {
+            //All variables have been set previously - `urlVariables` is obsolete
+            urlConfigs.reset();
+        }
+
+        configService->registerValidator<const char*>("AuthorizationKey", validateAuthorizationKeyHex);
+
+        ws_ping_interval_int = configService->declareConfiguration<int>("WebSocketPingInterval", 5);
+        reconnect_interval_int = configService->declareConfiguration<int>(MO_CONFIG_EXT_PREFIX "ReconnectInterval", 10);
+        stale_timeout_int = configService->declareConfiguration<int>(MO_CONFIG_EXT_PREFIX "StaleTimeout", 300);
+
+        if (!setting_backend_url_str ||
+                !setting_cb_id_str ||
+                !setting_auth_key_hex_str ||
+                !ws_ping_interval_int ||
+                !reconnect_interval_int ||
+                !stale_timeout_int) {
+            
+            MO_DBG_ERR("setup failure");
+            return false;
+        }
+    }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (ocppVersion == MO_OCPP_V201) {
+        varService = context->getModel201().getVariableService();
+        if (!varService) {
+            MO_DBG_ERR("setup failure");
+            return false;
+        }
+
+        /* Create dedicated container for connection URL variables. The server can change the URL variables using SetVariables.
+         * Usually, it needs to update multiple values at once (e.g. CsmsUrl and Identity). This update needs to be atomic, i.e.
+         * if the update fails due to a controller crash, either all values have been written to flash or none. This can be
+         * ensured by forcing all variables into the same container.
+         * To customize this behavior, declare the variables at the VariableService before executing this code. */
+
+        urlVariables = std::unique_ptr<MicroOcpp::Ocpp201::VariableContainerOwning>(new MicroOcpp::Ocpp201::VariableContainerOwning());
+        if (!urlVariables) {
+            MO_DBG_ERR("OOM");
+            return false;
+        }
+        if (filesystem) {
+            urlVariables->enablePersistency(filesystem, MO_WSCONN_FN_V201);
+        }
+
+        v201csmsUrlString = varService->getVariable("SecurityCtrlr", "CsmsUrl");
+        if (!v201csmsUrlString) {
+            auto csmsUrl = MicroOcpp::Ocpp201::makeVariable(MicroOcpp::Ocpp201::Variable::InternalDataType::String, MicroOcpp::Ocpp201::Variable::AttributeType::Actual);
+            if (!csmsUrl) {
+                MO_DBG_ERR("OOM");
+                return false;
+            }
+            csmsUrl->setComponentId("SecurityCtrlr");
+            csmsUrl->setName("CsmsUrl");
+            csmsUrl->setString(backend_url_factory ? backend_url_factory : "");
+            csmsUrl->setMutability(mutability);
+            csmsUrl->setPersistent();
+            csmsUrl->setRebootRequired();
+            v201csmsUrlString = csmsUrl.get();
+            urlVariables->add(std::move(csmsUrl));
+        }
+
+        v201identityString = varService->getVariable("SecurityCtrlr", "Identity");
+        if (!v201identityString) {
+            auto identity = MicroOcpp::Ocpp201::makeVariable(MicroOcpp::Ocpp201::Variable::InternalDataType::String, MicroOcpp::Ocpp201::Variable::AttributeType::Actual);
+            if (!identity) {
+                MO_DBG_ERR("OOM");
+                return false;
+            }
+            identity->setComponentId("SecurityCtrlr");
+            identity->setName("Identity");
+            identity->setString(charge_box_id_factory ? charge_box_id_factory : "");
+            identity->setMutability(mutability);
+            identity->setPersistent();
+            identity->setRebootRequired();
+            v201identityString = identity.get();
+            urlVariables->add(std::move(identity));
+        }
+
+        v201basicAuthPasswordString = varService->getVariable("SecurityCtrlr", "BasicAuthPassword");
+        if (!v201basicAuthPasswordString) {
+            auto basicAuthPassword = MicroOcpp::Ocpp201::makeVariable(MicroOcpp::Ocpp201::Variable::InternalDataType::String, MicroOcpp::Ocpp201::Variable::AttributeType::Actual);
+            if (!basicAuthPassword) {
+                MO_DBG_ERR("OOM");
+                return false;
+            }
+            basicAuthPassword->setComponentId("SecurityCtrlr");
+            basicAuthPassword->setName("BasicAuthPassword");
+            char basicAuthPasswordVal [MO_AUTHKEY_LEN_MAX + 1];
+            snprintf(basicAuthPasswordVal, sizeof(basicAuthPasswordVal), "%.*s", (int)auth_key_factory_len, auth_key_factory ? (const char*)auth_key_factory : "");
+            basicAuthPassword->setString(basicAuthPasswordVal);
+            basicAuthPassword->setMutability(mutability);
+            basicAuthPassword->setPersistent();
+            basicAuthPassword->setRebootRequired();
+            v201basicAuthPasswordString = basicAuthPassword.get();
+            urlVariables->add(std::move(basicAuthPassword));
+        }
+
+        if (urlVariables->size() > 0) {
+            urlVariables->load(); //if settings on flash already exist, this overwrites factory defaults
+            varService->addContainer(urlVariables.get());
+        } else {
+            //All variables have been set previously - `urlVariables` is obsolete
+            urlVariables.reset();
+        }
+        
+        v201retryBackOffWaitMinimumInt = varService->declareVariable<int>("OCPPCommCtrlr", "RetryBackOffWaitMinimum", 10);
+        v201staleTimeoutInt = varService->declareVariable<int>("CustomizationCtrlr", "StaleTimeout", 300);
+        v201webSocketPingIntervalInt = varService->declareVariable<int>("OCPPCommCtrlr", "WebSocketPingInterval", 5);
+
+        if (!v201retryBackOffWaitMinimumInt ||
+                !v201staleTimeoutInt ||
+                !v201webSocketPingIntervalInt) {
+            MO_DBG_ERR("setup failure");
+            return false;
+        }
+    }
+    #endif //MO_ENABLE_V201
 
     ca_cert = ca_certificate;
 
-    reloadConfigs(); //load WS creds with configs values
+    reloadUrl(); //load WS creds from configs / vars into local copy
 
 #if MO_MG_USE_VERSION == MO_MG_V614
     MO_DBG_DEBUG("use MG version %s (tested with 6.14)", MG_VERSION);
@@ -142,27 +373,17 @@ MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
     MO_DBG_DEBUG("use MG version %s (tested with 7.8)", MG_VERSION);
 #elif MO_MG_USE_VERSION == MO_MG_V713
     MO_DBG_DEBUG("use MG version %s (tested with 7.13)", MG_VERSION);
+#elif MO_MG_USE_VERSION == MO_MG_V714
+    MO_DBG_DEBUG("use MG version %s (tested with 7.14)", MG_VERSION);
+#elif MO_MG_USE_VERSION == MO_MG_V715
+    MO_DBG_DEBUG("use MG version %s (tested with 7.15)", MG_VERSION);
 #endif
 
     maintainWsConn();
-}
 
-MOcppMongooseClient::MOcppMongooseClient(struct mg_mgr *mgr,
-            const char *backend_url_factory, 
-            const char *charge_box_id_factory,
-            const char *auth_key_factory,
-            const char *ca_certificate,
-            std::shared_ptr<FilesystemAdapter> filesystem,
-            ProtocolVersion protocolVersion) :
+    context->setConnection(this);
 
-    MOcppMongooseClient(mgr,
-            backend_url_factory,
-            charge_box_id_factory,
-            (unsigned char *)auth_key_factory, auth_key_factory ? strlen(auth_key_factory) : 0,
-            ca_certificate,
-            filesystem,
-            protocolVersion) {
-
+    return true;
 }
 
 MOcppMongooseClient::~MOcppMongooseClient() {
@@ -176,6 +397,68 @@ MOcppMongooseClient::~MOcppMongooseClient() {
         websocket->fn_data = nullptr;
 #endif
     }
+}
+
+MO_MG_Connection *mo_createMongooseWsClient(
+        MO_Context *ctx, 
+        MO_FilesystemAdapter *filesystem,
+        struct mg_mgr *mgr,
+        const char *backendUrlFactory, 
+        const char *chargeBoxIdFactory, 
+        const char *authKeyFactory, 
+        const char *CA_cert) {
+
+    return mo_createMongooseWsClient2(
+        ctx,
+        filesystem,
+        mgr,
+        backendUrlFactory,
+        chargeBoxIdFactory,
+        (unsigned char *)authKeyFactory, authKeyFactory ? strlen(authKeyFactory) : 0,
+        CA_cert);
+}
+
+MO_MG_Connection *mo_createMongooseWsClient2(
+        MO_Context *ctx,
+        MO_FilesystemAdapter *filesystem,
+        struct mg_mgr *mgr,
+        const char *backendUrlFactory,
+        const char *chargeBoxIdFactory,
+        const unsigned char *authKeyFactory, size_t authKeyFactoryLen,
+        const char *CA_cert) {
+
+    if (!ctx) {
+        MO_DBG_ERR("OCPP uninitialized"); //need to call mocpp_initialize before
+        return nullptr;
+    }
+    auto context = reinterpret_cast<MicroOcpp::Context*>(ctx);
+
+    auto connection = new MOcppMongooseClient();
+    if (!connection) {
+        MO_DBG_ERR("OOM");
+        return nullptr;
+    }
+
+    bool success = connection->setupConnection(
+        context,
+        filesystem,
+        mgr, 
+        backendUrlFactory, 
+        chargeBoxIdFactory,
+        authKeyFactory, authKeyFactoryLen,
+        CA_cert);
+    
+    if (!success) {
+        MO_DBG_ERR("setup failure");
+        delete connection;
+        return nullptr;
+    }
+
+    return reinterpret_cast<MO_MG_Connection*>(connection);
+}
+
+void mo_freeMongooseWsClient(MO_MG_Connection *connection) {
+    delete reinterpret_cast<MOcppMongooseClient*>(connection);
 }
 
 void MOcppMongooseClient::loop() {
@@ -208,28 +491,57 @@ bool MOcppMongooseClient::sendTXT(const char *msg, size_t length) {
 }
 
 void MOcppMongooseClient::maintainWsConn() {
-    if (mocpp_tick_ms() - last_status_dbg_msg >= DEBUG_MSG_INTERVAL) {
-        last_status_dbg_msg = mocpp_tick_ms();
+
+    int wsPingInterval = 0;
+
+    #if MO_ENABLE_V16
+    if (ocppVersion == MO_OCPP_V16) {
+        wsPingInterval = ws_ping_interval_int->getInt();
+    }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (ocppVersion == MO_OCPP_V201) {
+        wsPingInterval = v201webSocketPingIntervalInt->getInt();
+    }
+    #endif //MO_ENABLE_V201
+
+    int32_t uptime = clock->getUptimeInt();
+
+    if (uptime - last_status_dbg_msg >= DEBUG_MSG_INTERVAL_S) {
+        last_status_dbg_msg = uptime;
 
         //WS successfully connected?
         if (!isConnectionOpen()) {
             MO_DBG_DEBUG("WS unconnected");
-        } else if (mocpp_tick_ms() - last_recv >= (ws_ping_interval_int && ws_ping_interval_int->getInt() > 0 ? (ws_ping_interval_int->getInt() * 1000UL) : 0UL) + WS_UNRESPONSIVE_THRESHOLD_MS) {
+        } else if (wsPingInterval > 0 && uptime - last_recv >= wsPingInterval + WS_UNRESPONSIVE_THRESHOLD_S) {
             //WS connected but unresponsive
             MO_DBG_DEBUG("WS unresponsive");
         }
     }
 
+    int staleTimeout = 0;
+
+    #if MO_ENABLE_V16
+    if (ocppVersion == MO_OCPP_V16) {
+        staleTimeout = stale_timeout_int->getInt();
+    }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (ocppVersion == MO_OCPP_V201) {
+        staleTimeout = v201staleTimeoutInt->getInt();
+    }
+    #endif //MO_ENABLE_V201
+
     if (websocket && isConnectionOpen() &&
-            stale_timeout_int && stale_timeout_int->getInt() > 0 && mocpp_tick_ms() - last_recv >= (stale_timeout_int->getInt() * 1000UL)) {
+            staleTimeout > 0 && uptime - last_recv >= staleTimeout) {
         MO_DBG_INFO("connection %s -- stale, reconnect", url.c_str());
         reconnect();
         return;
     }
 
     if (websocket && isConnectionOpen() &&
-            ws_ping_interval_int && ws_ping_interval_int->getInt() > 0 && mocpp_tick_ms() - last_hb >= (ws_ping_interval_int->getInt() * 1000UL)) {
-        last_hb = mocpp_tick_ms();
+            wsPingInterval > 0 && uptime - last_hb >= wsPingInterval) {
+        last_hb = uptime;
 #if MO_MG_USE_VERSION == MO_MG_V614
         mg_send_websocket_frame(websocket, WEBSOCKET_OP_PING, "", 0);
 #else
@@ -246,19 +558,32 @@ void MOcppMongooseClient::maintainWsConn() {
         return;
     }
 
-    if (reconnect_interval_int && reconnect_interval_int->getInt() > 0 && mocpp_tick_ms() - last_reconnection_attempt < (reconnect_interval_int->getInt() * 1000UL)) {
+    int reconnectInterval = 0;
+
+    #if MO_ENABLE_V16
+    if (ocppVersion == MO_OCPP_V16) {
+        reconnectInterval = reconnect_interval_int->getInt();
+    }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (ocppVersion == MO_OCPP_V201) {
+        reconnectInterval = v201retryBackOffWaitMinimumInt->getInt();
+    }
+    #endif //MO_ENABLE_V201
+
+    if (reconnectInterval > 0 && uptime - last_reconnection_attempt < reconnectInterval && last_reconnection_attempt >= 0) {
         return;
     }
 
     MO_DBG_DEBUG("(re-)connect to %s", url.c_str());
 
-    last_reconnection_attempt = mocpp_tick_ms();
+    last_reconnection_attempt = uptime;
 
     /*
      * determine auth token
      */
 
-    std::string basic_auth64;
+    MicroOcpp::String basic_auth64 = MicroOcpp::makeString(getMemoryTag());
 
     if (auth_key_len > 0) {
 
@@ -342,11 +667,11 @@ void MOcppMongooseClient::maintainWsConn() {
 
     websocket = mg_connect_ws_opt(
         mgr,
-        ws_cb,
+        mongoose_cb,
         this,
         opts,
         url.c_str(),
-        protocolVersion.major == 2 ? "ocpp2.0.1" : "ocpp1.6",
+        ocppVersion == MO_OCPP_V16 ? "ocpp1.6" : "ocpp2.0.1",
         *extra_headers ? extra_headers : nullptr);
 
     if (websocket) {
@@ -358,10 +683,10 @@ void MOcppMongooseClient::maintainWsConn() {
     websocket = mg_ws_connect(
         mgr, 
         url.c_str(), 
-        ws_cb, 
+        mongoose_cb, 
         this, 
         "Sec-WebSocket-Protocol: %s%s%s\r\n",
-                      protocolVersion.major == 2 ? "ocpp2.0.1" : "ocpp1.6",
+                      ocppVersion == MO_OCPP_V16 ? "ocpp1.6" : "ocpp2.0.1",
                       basic_auth64.empty() ? "" : "\r\nAuthorization: Basic ", 
                       basic_auth64.empty() ? "" : basic_auth64.c_str());     // Create client
 #endif
@@ -383,95 +708,96 @@ void MOcppMongooseClient::reconnect() {
     setConnectionOpen(false);
 }
 
-void MOcppMongooseClient::setBackendUrl(const char *backend_url_cstr) {
-    if (!backend_url_cstr) {
+bool mo_setBackendUrl(MO_MG_Connection *connection, const char *backendUrl) {
+    if (!backendUrl) {
         MO_DBG_ERR("invalid argument");
-        return;
+        return false;
     }
 
-#if MO_ENABLE_V201
-    if (protocolVersion.major == 2) {
-        if (v201csmsUrlString) {
-            v201csmsUrlString->setString(backend_url_cstr);
-            websocketSettings->commit();
-        }
-    } else
-#endif
-    {
-        if (setting_backend_url_str) {
-            setting_backend_url_str->setString(backend_url_cstr);
-            configuration_save();
-        }
-    }
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
 
+    #if MO_ENABLE_V16
+    if (conn->ocppVersion == MO_OCPP_V16) {
+        conn->setting_backend_url_str->setString(backendUrl);
+        conn->configService->commit();
+    }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (conn->ocppVersion == MO_OCPP_V201) {
+        conn->v201csmsUrlString->setString(backendUrl);
+        conn->varService->commit();
+    }
+    #endif //MO_ENABLE_V201
+    
+    return true;
 }
 
-void MOcppMongooseClient::setChargeBoxId(const char *cb_id_cstr) {
-    if (!cb_id_cstr) {
+bool mo_setChargeBoxId(MO_MG_Connection *connection, const char *chargeBoxId) {
+    if (!chargeBoxId) {
         MO_DBG_ERR("invalid argument");
-        return;
+        return false;
     }
 
-#if MO_ENABLE_V201
-    if (protocolVersion.major == 2) {
-        if (v201identityString) {
-            v201identityString->setString(cb_id_cstr);
-            websocketSettings->commit();
-        }
-    } else
-#endif
-    {
-        if (setting_cb_id_str) {
-            setting_cb_id_str->setString(cb_id_cstr);
-            configuration_save();
-        }
-    }
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
 
+    #if MO_ENABLE_V16
+    if (conn->ocppVersion == MO_OCPP_V16) {
+        conn->setting_cb_id_str->setString(chargeBoxId);
+        conn->configService->commit();
+    }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (conn->ocppVersion == MO_OCPP_V201) {
+        conn->v201identityString->setString(chargeBoxId);
+        conn->varService->commit();
+    }
+    #endif //MO_ENABLE_V201
+
+    return true;
 }
 
-void MOcppMongooseClient::setAuthKey(const char *auth_key_cstr) {
-    if (!auth_key_cstr) {
-        MO_DBG_ERR("invalid argument");
-        return;
-    }
-
-    return setAuthKey((const unsigned char*)auth_key_cstr, strlen(auth_key_cstr));
+bool mo_setAuthKey(MO_MG_Connection *connection, const char *authKey) {
+    return mo_setAuthKey2(connection, (const unsigned char*)authKey, strlen(authKey));
 }
 
-void MOcppMongooseClient::setAuthKey(const unsigned char *auth_key, size_t len) {
-    if (!auth_key || len > MO_AUTHKEY_LEN_MAX) {
+bool mo_setAuthKey2(MO_MG_Connection *connection, const unsigned char *authKey, size_t authKeyLen) {
+    if (!authKey || authKeyLen > MO_AUTHKEY_LEN_MAX) {
         MO_DBG_ERR("invalid argument");
-        return;
+        return false;
     }
 
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
 
-#if MO_ENABLE_V201
-    if (protocolVersion.major == 2) {
+    #if MO_ENABLE_V16
+    if (conn->ocppVersion == MO_OCPP_V16) {
+        char authKey_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
+        authKey_hex[0] = '\0';
+        for (size_t i = 0; i < authKeyLen; i++) {
+            snprintf(authKey_hex + 2 * i, 3, "%02X", authKey[i]);
+        }
+        conn->setting_auth_key_hex_str->setString(authKey_hex);
+        conn->configService->commit();
+    }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (conn->ocppVersion == MO_OCPP_V201) {
         char basicAuthPassword [MO_AUTHKEY_LEN_MAX + 1];
-        snprintf(basicAuthPassword, sizeof(basicAuthPassword), "%.*s", (int)len, auth_key ? (const char*)auth_key : "");
-        if (v201basicAuthPasswordString) {
-            v201basicAuthPasswordString->setString(basicAuthPassword);
-        }
-    } else
-#endif
-    {
-        char auth_key_hex [2 * MO_AUTHKEY_LEN_MAX + 1];
-        auth_key_hex[0] = '\0';
-        for (size_t i = 0; i < len; i++) {
-            snprintf(auth_key_hex + 2 * i, 3, "%02X", auth_key[i]);
-        }
-        if (setting_auth_key_hex_str) {
-            setting_auth_key_hex_str->setString(auth_key_hex);
-            configuration_save();
-        }
+        snprintf(basicAuthPassword, sizeof(basicAuthPassword), "%.*s", (int)authKeyLen, authKey ? (const char*)authKey : "");
+        conn->v201basicAuthPasswordString->setString(basicAuthPassword);
+        conn->varService->commit();
     }
+    #endif //MO_ENABLE_V201
+
+    return true;
 }
 
-void MOcppMongooseClient::setCaCert(const char *ca_cert_cstr) {
-    ca_cert = ca_cert_cstr; //updated ca_cert takes immediate effect
+bool mo_setCaCert(MO_MG_Connection *connection, const char *CA_cert) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    conn->ca_cert = CA_cert; //updated ca_cert takes immediate effect
+    return true;
 }
 
-void MOcppMongooseClient::reloadConfigs() {
+void MOcppMongooseClient::reloadUrl() {
 
     reconnect(); //closes WS connection; will be reopened in next maintainWsConn execution
 
@@ -479,54 +805,42 @@ void MOcppMongooseClient::reloadConfigs() {
      * reload WS credentials from configs
      */
 
-#if MO_ENABLE_V201
-    if (protocolVersion.major == 2) {
-        if (v201csmsUrlString) {
-            backend_url = v201csmsUrlString->getString();
+    #if MO_ENABLE_V16
+    if (ocppVersion == MO_OCPP_V16) {
+        backend_url = setting_backend_url_str->getString();
+        cb_id = setting_cb_id_str->getString();
+
+        auto auth_key_hex = setting_auth_key_hex_str->getString();
+        auto auth_key_hex_len = strlen(setting_auth_key_hex_str->getString());
+        if (!validateAuthorizationKeyHex(auth_key_hex)) {
+            MO_DBG_ERR("AuthorizationKey stored with format error. Disable Basic Auth");
+            auth_key_hex_len = 0;
         }
 
-        if (v201identityString) {
-            cb_id = v201identityString->getString();
+        auth_key_len = auth_key_hex_len / 2;
+
+        #if MO_MG_VERSION_614
+        cs_from_hex((char*)auth_key, auth_key_hex, auth_key_hex_len);
+        #elif MO_MG_USE_VERSION <= MO_MG_V713
+        mg_unhex(auth_key_hex, auth_key_hex_len, auth_key);
+        #else
+        for (size_t i = 0; i < auth_key_len; i++) {
+            mg_str_to_num(mg_str_n(auth_key_hex + 2*i, 2), 16, auth_key + i, sizeof(uint8_t));
         }
+        #endif
 
-        if (v201basicAuthPasswordString) {
-            snprintf((char*)auth_key, sizeof(auth_key), "%s", v201basicAuthPasswordString->getString());
-            auth_key_len = strlen((char*)auth_key);
-        }
-    } else
-#endif
-    {
-        if (setting_backend_url_str) {
-            backend_url = setting_backend_url_str->getString();
-        }
-
-        if (setting_cb_id_str) {
-            cb_id = setting_cb_id_str->getString();
-        }
-
-        if (setting_auth_key_hex_str) {
-            auto auth_key_hex = setting_auth_key_hex_str->getString();
-            auto auth_key_hex_len = strlen(setting_auth_key_hex_str->getString());
-            if (!validateAuthorizationKeyHex(auth_key_hex)) {
-                MO_DBG_ERR("AuthorizationKey stored with format error. Disable Basic Auth");
-                auth_key_hex_len = 0;
-            }
-
-            auth_key_len = auth_key_hex_len / 2;
-
-            #if MO_MG_VERSION_614
-            cs_from_hex((char*)auth_key, auth_key_hex, auth_key_hex_len);
-            #elif MO_MG_USE_VERSION <= MO_MG_V713
-            mg_unhex(auth_key_hex, auth_key_hex_len, auth_key);
-            #else
-            for (size_t i = 0; i < auth_key_len; i++) {
-                mg_str_to_num(mg_str_n(auth_key_hex + 2*i, 2), 16, auth_key + i, sizeof(uint8_t));
-            }
-            #endif
-
-            auth_key[auth_key_len] = '\0'; //need null-termination as long as deprecated `const char *getAuthKey()` exists
-        }
+        auth_key[auth_key_len] = '\0'; //need null-termination as long as deprecated `const char *getAuthKey()` exists
     }
+    #endif //MO_ENABLE_V16
+    #if MO_ENABLE_V201
+    if (ocppVersion == MO_OCPP_V201) {
+        backend_url = v201csmsUrlString->getString();
+        cb_id = v201identityString->getString();
+
+        snprintf((char*)auth_key, sizeof(auth_key), "%s", v201basicAuthPasswordString->getString());
+        auth_key_len = strlen((char*)auth_key);
+    }
+    #endif //MO_ENABLE_V201
 
     /*
      * determine new URL with updated WS credentials
@@ -560,7 +874,7 @@ int MOcppMongooseClient::printAuthKey(unsigned char *buf, size_t size) {
 void MOcppMongooseClient::setConnectionOpen(bool open) {
     if (open) {
         connection_established = true;
-        last_connection_established = mocpp_tick_ms();
+        last_connection_established = clock->getUptimeInt();
     } else {
         connection_closing = true;
     }
@@ -573,26 +887,52 @@ void MOcppMongooseClient::cleanConnection() {
 }
 
 void MOcppMongooseClient::updateRcvTimer() {
-    last_recv = mocpp_tick_ms();
+    last_recv = clock->getUptimeInt();
 }
 
-unsigned long MOcppMongooseClient::getLastRecv() {
-    return last_recv;
+void mo_reloadUrl(MO_MG_Connection *connection) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    conn->reloadUrl();
 }
 
-unsigned long MOcppMongooseClient::getLastConnected() {
-    return last_connection_established;
+const char *mo_getBackendUrl(MO_MG_Connection *connection) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    return conn->backend_url.c_str();
 }
 
-#if MO_ENABLE_V201
-VariableContainer *MOcppMongooseClient::getVariableContainer() {
-    return websocketSettings.get();
+const char *mo_getChargeBoxId(MO_MG_Connection *connection) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    return conn->cb_id.c_str();
 }
-#endif
+
+const char *mo_getAuthKey(MO_MG_Connection *connection) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    return (const char*)conn->auth_key;
+}
+
+const char *mo_getCaCert(MO_MG_Connection *connection) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    return conn->ca_cert ? conn->ca_cert : "";
+}
+
+bool mo_isConnected(MO_MG_Connection *connection) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    return conn->isConnected();
+}
+
+int32_t mo_getLastRecv(MO_MG_Connection *connection) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    return conn->last_recv;
+}
+
+int32_t mo_getLastConnected(MO_MG_Connection *connection) {
+    auto conn = reinterpret_cast<MOcppMongooseClient*>(connection);
+    return conn->last_connection_established;
+}
 
 #if MO_MG_USE_VERSION == MO_MG_V614
 
-void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
+void MOcppMongooseClient::mongoose_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
 
     MOcppMongooseClient *osock = nullptr;
     
@@ -606,7 +946,7 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
         case MG_EV_CONNECT: {
             int status = *((int *) ev_data);
             if (status != 0) {
-                MO_DBG_WARN("connection %s -- error %d", osock->getUrl(), status);
+                MO_DBG_WARN("connection %s -- error %d", osock->url.c_str(), status);
                 (void)0;
             }
             break;
@@ -614,10 +954,10 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
         case MG_EV_WEBSOCKET_HANDSHAKE_DONE: {
             struct http_message *hm = (struct http_message *) ev_data;
             if (hm->resp_code == 101) {
-                MO_DBG_INFO("connection %s -- connected!", osock->getUrl());
+                MO_DBG_INFO("connection %s -- connected!", osock->url.c_str());
                 osock->setConnectionOpen(true);
             } else {
-                MO_DBG_WARN("connection %s -- HTTP error %d", osock->getUrl(), hm->resp_code);
+                MO_DBG_WARN("connection %s -- HTTP error %d", osock->url.c_str(), hm->resp_code);
                 (void)0;
                 /* Connection will be closed after this. */
             }
@@ -631,7 +971,7 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
         case MG_EV_WEBSOCKET_FRAME: {
             struct websocket_message *wm = (struct websocket_message *) ev_data;
 
-            if (!osock->getReceiveTXTcallback()((const char *) wm->data, wm->size)) { //forward message to Context
+            if (!osock->receiveTXT((const char *) wm->data, wm->size)) { //forward message to Context
                 MO_DBG_ERR("processing WS input failed");
                 (void)0;
             }
@@ -643,7 +983,7 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
             break;
         }
         case MG_EV_CLOSE: {
-            MO_DBG_INFO("connection %s -- closed", osock->getUrl());
+            MO_DBG_INFO("connection %s -- closed", osock->url.c_str());
             osock->cleanConnection();
             break;
         }
@@ -653,9 +993,9 @@ void ws_cb(struct mg_connection *nc, int ev, void *ev_data, void *user_data) {
 #else
 
 #if MO_MG_USE_VERSION <= MO_MG_V708
-void ws_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
+void MOcppMongooseClient::mongoose_cb(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
 #else
-void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
+void MOcppMongooseClient::mongoose_cb(struct mg_connection *c, int ev, void *ev_data) {
     void *fn_data = c->fn_data;
 #endif
     if (ev != 2) {
@@ -680,8 +1020,8 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
         MG_ERROR(("%p %s", c->fd, (char *) ev_data));
     } else if (ev == MG_EV_CONNECT) {
         // If target URL is SSL/TLS, command client connection to use TLS
-        if (mg_url_is_ssl(osock->getUrl())) {
-            const char *ca_string = osock->getCaCert();
+        if (mg_url_is_ssl(osock->url.c_str())) {
+            const char *ca_string = osock->ca_cert;
             if (ca_string && *ca_string == '\0') { //check if certificate verification is disabled (cert string is empty)
                 //yes, disabled
                 ca_string = nullptr;
@@ -690,10 +1030,10 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
             memset(&opts, 0, sizeof(struct mg_tls_opts));
             #if MO_MG_USE_VERSION <= MO_MG_V708
             opts.ca = ca_string;
-            opts.srvname = mg_url_host(osock->getUrl());
+            opts.srvname = mg_url_host(osock->url.c_str());
             #else
             opts.ca = mg_str(ca_string);
-            opts.name = mg_url_host(osock->getUrl());
+            opts.name = mg_url_host(osock->url.c_str());
             #endif
             mg_tls_init(c, &opts);
         } else {
@@ -701,15 +1041,15 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
         }
     } else if (ev == MG_EV_WS_OPEN) {
         // WS connection established. Perform MQTT login
-        MO_DBG_INFO("connection %s -- connected!", osock->getUrl());
+        MO_DBG_INFO("connection %s -- connected!", osock->url.c_str());
         osock->setConnectionOpen(true);
         osock->updateRcvTimer();
     } else if (ev == MG_EV_WS_MSG) {
         struct mg_ws_message *wm = (struct mg_ws_message *) ev_data;
 #if MO_MG_USE_VERSION <= MO_MG_V713
-        if (!osock->getReceiveTXTcallback()((const char*) wm->data.ptr, wm->data.len)) {
+        if (!osock->receiveTXT((const char*) wm->data.ptr, wm->data.len)) {
 #else
-        if (!osock->getReceiveTXTcallback()((const char*) wm->data.buf, wm->data.len)) {
+        if (!osock->receiveTXT((const char*) wm->data.buf, wm->data.len)) {
 #endif
             MO_DBG_WARN("processing input message failed");
         }
@@ -719,13 +1059,15 @@ void ws_cb(struct mg_connection *c, int ev, void *ev_data) {
     }
 
     if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
-        MO_DBG_INFO("connection %s -- %s", osock->getUrl(), ev == MG_EV_CLOSE ? "closed" : "error");
+        MO_DBG_INFO("connection %s -- %s", osock->url.c_str(), ev == MG_EV_CLOSE ? "closed" : "error");
         osock->cleanConnection();
     }
 }
 #endif
 
-bool MicroOcpp::validateAuthorizationKeyHex(const char *auth_key_hex) {
+bool MOcppMongooseClient::validateAuthorizationKeyHex(const char *auth_key_hex, void *userData) {
+    (void)userData;
+
     if (!auth_key_hex) {
         return true; //nullptr (or "") means disable Auth
     }

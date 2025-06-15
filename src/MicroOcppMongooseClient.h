@@ -5,21 +5,24 @@
 #ifndef MO_MONGOOSECLIENT_H
 #define MO_MONGOOSECLIENT_H
 
+#include <string>
+#include <memory>
+
 #if defined(ARDUINO) //fix for conflicting definitions of IPAddress on Arduino
 #include <Arduino.h>
 #include <IPAddress.h>
 #endif
 
 #include "mongoose.h"
+
 #include <MicroOcpp/Core/Connection.h>
+#include <MicroOcpp/Context.h>
+#include <MicroOcpp/Core/FilesystemAdapter.h>
 #include <MicroOcpp/Version.h>
 
-#include <string>
-#include <memory>
-
 #ifndef MO_WSCONN_FN
-#define MO_WSCONN_FN (MO_FILENAME_PREFIX "ws-conn.jsn")
-#define MO_WSCONN_FN_V201 (MO_FILENAME_PREFIX "ws-conn-v201.jsn")
+#define MO_WSCONN_FN  "ws-conn.jsn"
+#define MO_WSCONN_FN_V201 "ws-conn-v201.jsn"
 #endif
 
 #if MO_ENABLE_V201
@@ -28,118 +31,62 @@
 #define MO_AUTHKEY_LEN_MAX 20 //AuthKey in Bytes. Hex value has double length
 #endif
 
-namespace MicroOcpp {
 
-class FilesystemAdapter;
-class Configuration;
-
-#if MO_ENABLE_V201
-class Variable;
-class VariableContainer;
-class VariableContainerOwning;
+#ifdef __cplusplus
+extern "C" {
 #endif
 
-class MOcppMongooseClient : public MicroOcpp::Connection {
-private:
-    struct mg_mgr *mgr {nullptr};
-    struct mg_connection *websocket {nullptr};
-    std::string backend_url;
-    std::string cb_id;
-    std::string url; //url = backend_url + '/' + cb_id
-    unsigned char auth_key [MO_AUTHKEY_LEN_MAX + 1]; //OCPP 2.0.1: BasicAuthPassword. OCPP 1.6: AuthKey in bytes encoding ("FF01" = {0xFF, 0x01}). Both versions append a terminating '\0'
-    size_t auth_key_len;
-    const char *ca_cert; //zero-copy. The host system must ensure that this pointer remains valid during the lifetime of this class
-    std::shared_ptr<Configuration> setting_backend_url_str;
-    std::shared_ptr<Configuration> setting_cb_id_str;
-    std::shared_ptr<Configuration> setting_auth_key_hex_str;
-    unsigned long last_status_dbg_msg {0}, last_recv {0};
-    std::shared_ptr<Configuration> reconnect_interval_int; //minimum time between two connect trials in s
-    unsigned long last_reconnection_attempt {-1UL / 2UL};
-    std::shared_ptr<Configuration> stale_timeout_int; //inactivity period after which the connection will be closed
-    std::shared_ptr<Configuration> ws_ping_interval_int; //heartbeat intervall in s. 0 sets hb off
-    unsigned long last_hb {0};
-#if MO_ENABLE_V201
-    std::unique_ptr<VariableContainerOwning> websocketSettings;
-    Variable *v201csmsUrlString = nullptr;
-    Variable *v201identityString = nullptr;
-    Variable *v201basicAuthPasswordString = nullptr;
-#endif
-    bool connection_established {false};
-    unsigned long last_connection_established {-1UL / 2UL};
-    bool connection_closing {false};
-    ReceiveTXTcallback receiveTXTcallback = [] (const char *, size_t) {return false;};
+struct MO_MG_Connection;
+typedef struct MO_MG_Connection MO_MG_Connection;
 
-    ProtocolVersion protocolVersion;
+//Configure MO with Mongoose WS client. Do this after `mo_initialize()` and before `mo_setup()`.
+//Returns a handle for the Mongoose WS Client which can be passed to other API functions here. If
+//the operation fails, returns NULL. Need to free resources after `mo_deinitialize()`.
+MO_MG_Connection *mo_createMongooseWsClient(
+        MO_Context *ctx, //pass return value of `mo_getApiContext()`
+        MO_FilesystemAdapter *filesystem, //pass return value `mo_getFilesystem()`. May need to use `mo_setDefaultFilesystemConfig()` before
+        struct mg_mgr *mgr, //Mongoose context. Must outlive MO. MO does not take ownership of `mgr`
+        const char *backendUrlFactory,   //e.g. "wss://example.com:8443/steve/websocket/CentralSystemService". Can be NULL
+        const char *chargeBoxIdFactory, //e.g. "charger001". Can be NULL
+        const char *authKeyFactory, //authorizationKey (as string) present in the websocket message header. Can be NULL. Set this to enable OCPP Security Profile 2
+        const char *CA_cert); //zero-copy, the string must outlive this class and mg_mgr. Forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
 
-    void reconnect();
+//Alternative version with authKey as bytes array (thus, allowing the key to contain 0-bytes)
+MO_MG_Connection *mo_createMongooseWsClient2(
+        MO_Context *ctx, //pass return value of `mo_getApiContext()`
+        MO_FilesystemAdapter *filesystem, //pass return value `mo_getFilesystem()`. May need to use `mo_setDefaultFilesystemConfig()` before
+        struct mg_mgr *mgr, //Mongoose context. Must outlive MO. MO does not take ownership of `mgr`
+        const char *backendUrlFactory,   //e.g. "wss://example.com:8443/steve/websocket/CentralSystemService". Can be NULL
+        const char *chargeBoxIdFactory, //e.g. "charger001". Can be NULL
+        const unsigned char *authKeyFactory, //authorizationKey (as bytes) present in the websocket message header. Can be NULL. Set this to enable OCPP Security Profile 2
+        size_t authKeyFactoryLen, //length of `authKeyFactory` in bytes
+        const char *CA_cert); //zero-copy, the string must outlive this class and mg_mgr. Forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
 
-    void maintainWsConn();
+//Free allocated resources. Need to call this after `mo_deinitialize()`, or manually unset connection
+//in Context object if freeing before
+void mo_freeMongooseWsClient(MO_MG_Connection *connection);
 
-public:
-    MOcppMongooseClient(struct mg_mgr *mgr, 
-            const char *backend_url_factory, 
-            const char *charge_box_id_factory,
-            unsigned char *auth_key_factory, size_t auth_key_factory_len,
-            const char *ca_cert = nullptr, //zero-copy, the string must outlive this class and mg_mgr. Forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
-            std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem = nullptr,
-            ProtocolVersion protocolVersion = ProtocolVersion(1,6));
-    
-    //DEPRECATED: will be removed in a future release
-    MOcppMongooseClient(struct mg_mgr *mgr, 
-            const char *backend_url_factory = nullptr, 
-            const char *charge_box_id_factory = nullptr,
-            const char *auth_key_factory = nullptr,
-            const char *ca_cert = nullptr, //zero-copy, the string must outlive this class and mg_mgr. Forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
-            std::shared_ptr<MicroOcpp::FilesystemAdapter> filesystem = nullptr,
-            ProtocolVersion protocolVersion = ProtocolVersion(1,6));
+//update WS configs. To apply the updates, call `mo_reloadUrl()` afterwards
+bool mo_setBackendUrl(MO_MG_Connection *connection, const char *backendUrl);
+bool mo_setChargeBoxId(MO_MG_Connection *connection, const char *chargeBoxId);
+bool mo_setAuthKey(MO_MG_Connection *connection, const char *authKey); //set the auth key as c-string
+bool mo_setAuthKey2(MO_MG_Connection *connection, const unsigned char *authKey, size_t authKeyLen); //set the auth key as bytes array
+bool mo_setCaCert(MO_MG_Connection *connection, const char *CA_cert);
 
-    ~MOcppMongooseClient();
+void mo_reloadUrl(MO_MG_Connection *connection);
 
-    void loop() override;
+const char *mo_getBackendUrl(MO_MG_Connection *connection);
+const char *mo_getChargeBoxId(MO_MG_Connection *connection);
+const char *mo_getAuthKey(MO_MG_Connection *connection);
+const char *mo_getCaCert(MO_MG_Connection *connection);
 
-    bool sendTXT(const char *msg, size_t length) override;
+bool mo_isConnected(MO_MG_Connection *connection);
 
-    void setReceiveTXTcallback(MicroOcpp::ReceiveTXTcallback &receiveTXT) override {
-        this->receiveTXTcallback = receiveTXT;
-    }
+int32_t mo_getLastRecv(MO_MG_Connection *connection); //get time of last successful receive in seconds since boot
+int32_t mo_getLastConnected(MO_MG_Connection *connection); //get time of last connection establish in seconds since boot or -1 if never connected
 
-    MicroOcpp::ReceiveTXTcallback &getReceiveTXTcallback() {
-        return receiveTXTcallback;
-    }
-
-    //update WS configs. To apply the updates, call `reloadConfigs()` afterwards
-    void setBackendUrl(const char *backend_url);
-    void setChargeBoxId(const char *cb_id);
-    void setAuthKey(const char *auth_key); //DEPRECATED: will be removed in a future release
-    void setAuthKey(const unsigned char *auth_key, size_t len); //set the auth key in bytes-encoded format
-    void setCaCert(const char *ca_cert); //forwards this string to Mongoose as ssl_ca_cert (see https://github.com/cesanta/mongoose/blob/ab650ec5c99ceb52bb9dc59e8e8ec92a2724932b/mongoose.h#L4192)
-
-    void reloadConfigs();
-
-    const char *getBackendUrl() {return backend_url.c_str();}
-    const char *getChargeBoxId() {return cb_id.c_str();}
-    const char *getAuthKey() {return (const char*)auth_key;} //DEPRECATED: will be removed in a future release
-    int printAuthKey(unsigned char *buf, size_t size);
-    const char *getCaCert() {return ca_cert ? ca_cert : "";}
-
-    const char *getUrl() {return url.c_str();}
-
-    void setConnectionOpen(bool open);
-    bool isConnectionOpen() {return connection_established && !connection_closing;}
-    bool isConnected() {return isConnectionOpen();}
-    void cleanConnection();
-
-    void updateRcvTimer();
-    unsigned long getLastRecv(); //get time of last successful receive in millis
-    unsigned long getLastConnected(); //get time of last connection establish
-
-#if MO_ENABLE_V201
-    //WS client creates and manages its own Variables. This getter function is a temporary solution, in future
-    //the WS client will be initialized with a Context reference for registering the Variables directly
-    VariableContainer *getVariableContainer();
-#endif
-};
-
+#ifdef __cplusplus
 }
+#endif
 
 #endif
