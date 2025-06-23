@@ -44,7 +44,7 @@ typedef struct MO_MG_Connection MO_MG_Connection;
 //the operation fails, returns NULL. Need to free resources after `mo_deinitialize()`.
 MO_MG_Connection *mo_createMongooseWsClient(
         MO_Context *ctx, //pass return value of `mo_getApiContext()`
-        MO_FilesystemAdapter *filesystem, //pass return value `mo_getFilesystem()`. May need to use `mo_setDefaultFilesystemConfig()` before
+        MO_FilesystemAdapter *filesystem, //pass return value `mo_getFilesystem()`. May need to use `mo_setFilesystemConfig()` before
         struct mg_mgr *mgr, //Mongoose context. Must outlive MO. MO does not take ownership of `mgr`
         const char *backendUrlFactory,   //e.g. "wss://example.com:8443/steve/websocket/CentralSystemService". Can be NULL
         const char *chargeBoxIdFactory, //e.g. "charger001". Can be NULL
@@ -54,7 +54,7 @@ MO_MG_Connection *mo_createMongooseWsClient(
 //Alternative version with authKey as bytes array (thus, allowing the key to contain 0-bytes)
 MO_MG_Connection *mo_createMongooseWsClient2(
         MO_Context *ctx, //pass return value of `mo_getApiContext()`
-        MO_FilesystemAdapter *filesystem, //pass return value `mo_getFilesystem()`. May need to use `mo_setDefaultFilesystemConfig()` before
+        MO_FilesystemAdapter *filesystem, //pass return value `mo_getFilesystem()`. May need to use `mo_setFilesystemConfig()` before
         struct mg_mgr *mgr, //Mongoose context. Must outlive MO. MO does not take ownership of `mgr`
         const char *backendUrlFactory,   //e.g. "wss://example.com:8443/steve/websocket/CentralSystemService". Can be NULL
         const char *chargeBoxIdFactory, //e.g. "charger001". Can be NULL
