@@ -45,24 +45,24 @@ struct MOcppMongooseClient : public MicroOcpp::Connection, public MicroOcpp::Mem
     const char *ca_cert; //zero-copy. The host system must ensure that this pointer remains valid during the lifetime of this class
 
 #if MO_ENABLE_V16
-    MicroOcpp::Ocpp16::ConfigurationService *configService = nullptr;
-    std::unique_ptr<MicroOcpp::Ocpp16::ConfigurationContainerOwning> urlConfigs;
-    MicroOcpp::Ocpp16::Configuration *setting_backend_url_str = nullptr;
-    MicroOcpp::Ocpp16::Configuration *setting_cb_id_str = nullptr;
-    MicroOcpp::Ocpp16::Configuration *setting_auth_key_hex_str = nullptr;
-    MicroOcpp::Ocpp16::Configuration *reconnect_interval_int = nullptr; //minimum time between two connect trials in s
-    MicroOcpp::Ocpp16::Configuration *stale_timeout_int = nullptr; //inactivity period after which the connection will be closed
-    MicroOcpp::Ocpp16::Configuration *ws_ping_interval_int = nullptr; //heartbeat intervall in s. 0 sets hb off
+    MicroOcpp::v16::ConfigurationService *configService = nullptr;
+    std::unique_ptr<MicroOcpp::v16::ConfigurationContainerOwning> urlConfigs;
+    MicroOcpp::v16::Configuration *setting_backend_url_str = nullptr;
+    MicroOcpp::v16::Configuration *setting_cb_id_str = nullptr;
+    MicroOcpp::v16::Configuration *setting_auth_key_hex_str = nullptr;
+    MicroOcpp::v16::Configuration *reconnect_interval_int = nullptr; //minimum time between two connect trials in s
+    MicroOcpp::v16::Configuration *stale_timeout_int = nullptr; //inactivity period after which the connection will be closed
+    MicroOcpp::v16::Configuration *ws_ping_interval_int = nullptr; //heartbeat intervall in s. 0 sets hb off
 #endif //MO_ENABLE_V16
 #if MO_ENABLE_V201
-    MicroOcpp::Ocpp201::VariableService *varService = nullptr;
-    std::unique_ptr<MicroOcpp::Ocpp201::VariableContainerOwning> urlVariables;
-    MicroOcpp::Ocpp201::Variable *v201csmsUrlString = nullptr;
-    MicroOcpp::Ocpp201::Variable *v201identityString = nullptr;
-    MicroOcpp::Ocpp201::Variable *v201basicAuthPasswordString = nullptr;
-    MicroOcpp::Ocpp201::Variable *v201retryBackOffWaitMinimumInt = nullptr;
-    MicroOcpp::Ocpp201::Variable *v201staleTimeoutInt = nullptr;
-    MicroOcpp::Ocpp201::Variable *v201webSocketPingIntervalInt = nullptr;
+    MicroOcpp::v201::VariableService *varService = nullptr;
+    std::unique_ptr<MicroOcpp::v201::VariableContainerOwning> urlVariables;
+    MicroOcpp::v201::Variable *v201csmsUrlString = nullptr;
+    MicroOcpp::v201::Variable *v201identityString = nullptr;
+    MicroOcpp::v201::Variable *v201basicAuthPasswordString = nullptr;
+    MicroOcpp::v201::Variable *v201retryBackOffWaitMinimumInt = nullptr;
+    MicroOcpp::v201::Variable *v201staleTimeoutInt = nullptr;
+    MicroOcpp::v201::Variable *v201webSocketPingIntervalInt = nullptr;
 #endif //MO_ENABLE_V201
 
     int32_t last_status_dbg_msg {0}, last_recv {0};
@@ -178,7 +178,7 @@ bool MOcppMongooseClient::setupConnection(
             return false;
         }
 
-        urlConfigs = std::unique_ptr<MicroOcpp::Ocpp16::ConfigurationContainerOwning>(new MicroOcpp::Ocpp16::ConfigurationContainerOwning());
+        urlConfigs = std::unique_ptr<MicroOcpp::v16::ConfigurationContainerOwning>(new MicroOcpp::v16::ConfigurationContainerOwning());
         if (!urlConfigs) {
             MO_DBG_ERR("OOM");
             return false;
@@ -190,7 +190,7 @@ bool MOcppMongooseClient::setupConnection(
 
         setting_backend_url_str = configService->getConfiguration(MO_CONFIG_EXT_PREFIX "BackendUrl");
         if (!setting_backend_url_str) {
-            auto config = MicroOcpp::Ocpp16::makeConfiguration(MicroOcpp::Ocpp16::Configuration::Type::String);
+            auto config = MicroOcpp::v16::makeConfiguration(MicroOcpp::v16::Configuration::Type::String);
             if (!config) {
                 MO_DBG_ERR("OOM");
                 return false;
@@ -205,7 +205,7 @@ bool MOcppMongooseClient::setupConnection(
 
         setting_cb_id_str = configService->getConfiguration(MO_CONFIG_EXT_PREFIX "ChargeBoxId");
         if (!setting_cb_id_str) {
-            auto config = MicroOcpp::Ocpp16::makeConfiguration(MicroOcpp::Ocpp16::Configuration::Type::String);
+            auto config = MicroOcpp::v16::makeConfiguration(MicroOcpp::v16::Configuration::Type::String);
             if (!config) {
                 MO_DBG_ERR("OOM");
                 return false;
@@ -220,7 +220,7 @@ bool MOcppMongooseClient::setupConnection(
 
         setting_auth_key_hex_str = configService->getConfiguration("AuthorizationKey");
         if (!setting_auth_key_hex_str) {
-            auto config = MicroOcpp::Ocpp16::makeConfiguration(MicroOcpp::Ocpp16::Configuration::Type::String);
+            auto config = MicroOcpp::v16::makeConfiguration(MicroOcpp::v16::Configuration::Type::String);
             if (!config) {
                 MO_DBG_ERR("OOM");
                 return false;
@@ -280,7 +280,7 @@ bool MOcppMongooseClient::setupConnection(
          * ensured by forcing all variables into the same container.
          * To customize this behavior, declare the variables at the VariableService before executing this code. */
 
-        urlVariables = std::unique_ptr<MicroOcpp::Ocpp201::VariableContainerOwning>(new MicroOcpp::Ocpp201::VariableContainerOwning());
+        urlVariables = std::unique_ptr<MicroOcpp::v201::VariableContainerOwning>(new MicroOcpp::v201::VariableContainerOwning());
         if (!urlVariables) {
             MO_DBG_ERR("OOM");
             return false;
@@ -291,7 +291,7 @@ bool MOcppMongooseClient::setupConnection(
 
         v201csmsUrlString = varService->getVariable("SecurityCtrlr", "CsmsUrl");
         if (!v201csmsUrlString) {
-            auto csmsUrl = MicroOcpp::Ocpp201::makeVariable(MicroOcpp::Ocpp201::Variable::InternalDataType::String, MicroOcpp::Ocpp201::Variable::AttributeType::Actual);
+            auto csmsUrl = MicroOcpp::v201::makeVariable(MicroOcpp::v201::Variable::InternalDataType::String, MicroOcpp::v201::Variable::AttributeType::Actual);
             if (!csmsUrl) {
                 MO_DBG_ERR("OOM");
                 return false;
@@ -308,7 +308,7 @@ bool MOcppMongooseClient::setupConnection(
 
         v201identityString = varService->getVariable("SecurityCtrlr", "Identity");
         if (!v201identityString) {
-            auto identity = MicroOcpp::Ocpp201::makeVariable(MicroOcpp::Ocpp201::Variable::InternalDataType::String, MicroOcpp::Ocpp201::Variable::AttributeType::Actual);
+            auto identity = MicroOcpp::v201::makeVariable(MicroOcpp::v201::Variable::InternalDataType::String, MicroOcpp::v201::Variable::AttributeType::Actual);
             if (!identity) {
                 MO_DBG_ERR("OOM");
                 return false;
@@ -325,7 +325,7 @@ bool MOcppMongooseClient::setupConnection(
 
         v201basicAuthPasswordString = varService->getVariable("SecurityCtrlr", "BasicAuthPassword");
         if (!v201basicAuthPasswordString) {
-            auto basicAuthPassword = MicroOcpp::Ocpp201::makeVariable(MicroOcpp::Ocpp201::Variable::InternalDataType::String, MicroOcpp::Ocpp201::Variable::AttributeType::Actual);
+            auto basicAuthPassword = MicroOcpp::v201::makeVariable(MicroOcpp::v201::Variable::InternalDataType::String, MicroOcpp::v201::Variable::AttributeType::Actual);
             if (!basicAuthPassword) {
                 MO_DBG_ERR("OOM");
                 return false;
@@ -534,7 +534,8 @@ void MOcppMongooseClient::maintainWsConn() {
 
     if (websocket && isConnectionOpen() &&
             staleTimeout > 0 && uptime - last_recv >= staleTimeout) {
-        MO_DBG_INFO("connection %s -- stale, reconnect", url.c_str());
+        MO_DBG_INFO("connection stale, reconnect");
+        MO_DBG_DEBUG("(connection %s)", url.c_str());
         reconnect();
         return;
     }
@@ -946,7 +947,8 @@ void MOcppMongooseClient::mongoose_cb(struct mg_connection *nc, int ev, void *ev
         case MG_EV_CONNECT: {
             int status = *((int *) ev_data);
             if (status != 0) {
-                MO_DBG_WARN("connection %s -- error %d", osock->url.c_str(), status);
+                MO_DBG_WARN("connection error %d", status);
+                MO_DBG_DEBUG("(connection %s)", osock->url.c_str());
                 (void)0;
             }
             break;
@@ -954,10 +956,12 @@ void MOcppMongooseClient::mongoose_cb(struct mg_connection *nc, int ev, void *ev
         case MG_EV_WEBSOCKET_HANDSHAKE_DONE: {
             struct http_message *hm = (struct http_message *) ev_data;
             if (hm->resp_code == 101) {
-                MO_DBG_INFO("connection %s -- connected!", osock->url.c_str());
+                MO_DBG_INFO("connection connected!");
+                MO_DBG_DEBUG("(connection %s)", osock->url.c_str());
                 osock->setConnectionOpen(true);
             } else {
-                MO_DBG_WARN("connection %s -- HTTP error %d", osock->url.c_str(), hm->resp_code);
+                MO_DBG_WARN("HTTP error %d", hm->resp_code);
+                MO_DBG_DEBUG("(connection %s)", osock->url.c_str());
                 (void)0;
                 /* Connection will be closed after this. */
             }
@@ -983,7 +987,8 @@ void MOcppMongooseClient::mongoose_cb(struct mg_connection *nc, int ev, void *ev
             break;
         }
         case MG_EV_CLOSE: {
-            MO_DBG_INFO("connection %s -- closed", osock->url.c_str());
+            MO_DBG_INFO("connection closed");
+            MO_DBG_DEBUG("(connection %s)", osock->url.c_str());
             osock->cleanConnection();
             break;
         }
@@ -1041,7 +1046,8 @@ void MOcppMongooseClient::mongoose_cb(struct mg_connection *c, int ev, void *ev_
         }
     } else if (ev == MG_EV_WS_OPEN) {
         // WS connection established. Perform MQTT login
-        MO_DBG_INFO("connection %s -- connected!", osock->url.c_str());
+        MO_DBG_INFO("connected!");
+        MO_DBG_DEBUG("(connection %s)", osock->url.c_str());
         osock->setConnectionOpen(true);
         osock->updateRcvTimer();
     } else if (ev == MG_EV_WS_MSG) {
@@ -1059,7 +1065,8 @@ void MOcppMongooseClient::mongoose_cb(struct mg_connection *c, int ev, void *ev_
     }
 
     if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE) {
-        MO_DBG_INFO("connection %s -- %s", osock->url.c_str(), ev == MG_EV_CLOSE ? "closed" : "error");
+        MO_DBG_INFO("connection %s", ev == MG_EV_CLOSE ? "closed" : "error");
+        MO_DBG_DEBUG("(connection %s)", osock->url.c_str());
         osock->cleanConnection();
     }
 }
