@@ -299,6 +299,7 @@ bool MOcppMongooseClient::setupConnection(
             csmsUrl->setComponentId("SecurityCtrlr");
             csmsUrl->setName("CsmsUrl");
             csmsUrl->setString(backend_url_factory ? backend_url_factory : "");
+            csmsUrl->setVariableDataType(MicroOcpp::v201::VariableCharacteristics::DataType::string);
             csmsUrl->setMutability(mutability);
             csmsUrl->setPersistent();
             csmsUrl->setRebootRequired();
@@ -316,6 +317,7 @@ bool MOcppMongooseClient::setupConnection(
             identity->setComponentId("SecurityCtrlr");
             identity->setName("Identity");
             identity->setString(charge_box_id_factory ? charge_box_id_factory : "");
+            identity->setVariableDataType(MicroOcpp::v201::VariableCharacteristics::DataType::string);
             identity->setMutability(mutability);
             identity->setPersistent();
             identity->setRebootRequired();
@@ -335,6 +337,7 @@ bool MOcppMongooseClient::setupConnection(
             char basicAuthPasswordVal [MO_AUTHKEY_LEN_MAX + 1];
             snprintf(basicAuthPasswordVal, sizeof(basicAuthPasswordVal), "%.*s", (int)auth_key_factory_len, auth_key_factory ? (const char*)auth_key_factory : "");
             basicAuthPassword->setString(basicAuthPasswordVal);
+            basicAuthPassword->setVariableDataType(MicroOcpp::v201::VariableCharacteristics::DataType::string);
             basicAuthPassword->setMutability(mutability);
             basicAuthPassword->setPersistent();
             basicAuthPassword->setRebootRequired();
