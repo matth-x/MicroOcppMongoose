@@ -234,7 +234,8 @@ bool MOcppMongooseClient::setupConnection(
                 }
             }
             config->setString(auth_key_hex);
-            config->setMutability(mutability);
+            config->setMutability((mutability == MicroOcpp::Mutability::ReadWrite) ? MicroOcpp::Mutability::WriteOnly :
+                                  (mutability == MicroOcpp::Mutability::ReadOnly) ? MicroOcpp::Mutability::None : mutability);
             config->setRebootRequired();
             setting_auth_key_hex_str = config.get();
             urlConfigs->add(std::move(config));
